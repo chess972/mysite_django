@@ -1,0 +1,13 @@
+{# "tournoi/partials/table.html" - context: table={ headers:[...], rows:[...], style:..., footnote:... #}
+{% if table.style %}<style>{{ table.style }}</style>
+{% endif %}<table><thead><tr>
+    {% for header in table.headers %}<th>{{ header }}</th>{% endfor %}
+    </tr>
+  </thead>
+  <tbody>{% for row in table.rows  %}
+    <tr>{% for cell in row %}
+        <td {% if cell.class %}class="{{cell.class}}"{% endif %}>{{cell.text}}</td>{% endfor %}
+    </tr>{% endfor %}
+ </tbody>
+</table>
+{{ table.footnote }}

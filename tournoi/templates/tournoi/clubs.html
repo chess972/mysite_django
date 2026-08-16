@@ -1,0 +1,64 @@
+{#<!-- tournoi/templates/tournoi/clubs.html -- context: 'clubs'-->#}
+{% extends "base.html" %}
+{% block title %}Clubs | Gestion CFE-CFT-LFR - (c) 2025 - 2026 by MFH{% endblock %}
+{% block content %}
+<style>
+    dt { font-weight: bold; } td {text-align:center;}
+    .selected { font-weight: bold; background: lime; border: 1px solid #00FF00; padding-left: 1em; padding-right: 1em;}
+    .hidden { font-style: italic; background: gray; border: 1px solid #666; padding-left: 1em; padding-right: 1em;}
+}
+</style>
+<h1>Les clubs participant aux compétitions CFE - CFT - LFR</h1>
+<form method="post">{% csrf_token %}  <!-- Mandatory security tag in Django POST forms -->
+<table border=1 cellspacing=0><thead>
+    <tr><th>id</th><th>Nom court</th><th>Nom long</th><th>Abbréviation</th><th>Membres</th></tr>
+</thead>
+<tbody>{% for club in clubs %}
+<tr><td><a {% if user.is_staff %}href="{{club.api}}"{% endif %}>{{club.id}}</a></td>
+    <td><a href="{{club.url}}" {% if user.is_staff %}
+    id="new_name" contenteditable onchange="rename(this);" data-oldname="{{club.name}}"
+    {% endif %}>{{club.name}}</span></td>
+    <td><a href="{{club.url}}">{{club.raw_data.name|default:"?"}}</a></td>
+    <td>{{club.abbreviation}}</td>
+    <td>{{club.raw_data.members_count|default:"?"}}</td>
+</tr>
+{% endfor %}{# club in clubs {% if user.is_staff %} #}
+</tbody>
+</table>
+</form>{# ... #}
+{% if user.is_staff %}
+<script>
+function rename(el){
+    const params = new URLSearchParams({
+        old_name: el.dataset.oldname,
+        new_name: el.innerText
+    }); window.location = "{% url 'tournoi:rename_club' %}?" + params.toString();}
+</script>
+<dl>
+<dt> Clubs:
+<dd>
+<pre>
+(2) - Visualiser et/ou actualiser la liste des clubs participants
+(5) - Afficher la liste des joueurs pour un club donné.
+(6) - Afficher la liste des rencontres pour chaque joueur d'un club donné.
+(9) - Liste des rencontres perdues au temps pour chaque joueur d'un club donné.
+(-) -
+<form action="{% url 'tournoi:rename_club' %}" method="get" class="form-inline">
+{#<!-- la page rename_club va demander confirmation -->#}
+    <button type="submit" class="btn btn-warning">Renommer</button>
+    <input name="new_name" required/>
+    <input name="old_name" value="{{club.name}}" required>
+</form>
+</pre>
+</dd>
+
+<dt> Joueurs:
+<dd>
+<pre>
+(3) - Afficher les joueurs multi-équipes
+(4) - Afficher la liste des rencontres en cours et à venir pour un joueur donné.
+(8) - Afficher la liste des rencontres perdues au temps pour un joueur donné.
+</pre>
+</dl>
+{% endif %}{# user.is_staff #}
+{% endblock %}

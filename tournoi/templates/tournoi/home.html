@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Gestion CFE-LFR-CFT - by MFH</title>
+</head>
+<body>
+<h1>Bienvenue sur mon site pour gestion CFE-LFR-CFT</h1>
+
+
+<h2>Welcome to the {{ t_name }}
+</h2>
+
+There are currently {{ players }} players registered.
+
+
+    <!-- The button triggers the JS function -->
+    <button id="loadBtn" onclick="runBackgroundFetch()">Load Matches</button>
+
+    <!-- This empty div is where the data will appear -->
+    <div id="resultsArea" style="margin-top: 20px;"></div>
+
+    <script>
+        function runBackgroundFetch() {
+            // Grab the button and the empty div from the page
+            const btn = document.getElementById('loadBtn');
+            const results = document.getElementById('resultsArea');
+
+            // 1. Disable the button and show the Loading message
+            btn.disabled = true;
+            results.innerHTML = "<p><em>Loading data from chess.com... Please wait.</em></p>";
+
+            // 2. Fetch the data quietly in the background
+            fetch('/api/get-matches/')
+                .then(response => response.text()) // Expect raw HTML text back
+                .then(html_data => {
+                    // 3. Inject the HTML we got from Python into the page
+                    results.innerHTML = html_data;
+                    // Re-enable the button so they can click it again if needed
+                    btn.disabled = false;
+                });
+        }
+    </script>
+</body>
+</html>

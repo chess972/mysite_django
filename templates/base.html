@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{% block title %}MFH's Web Apps on PythonAnywhere{% endblock %}</title>
+    <style>
+    .msg-success { color: white; background-color: green; padding: 10px; border-radius: 5px; }
+    .msg-warning { color: black; background-color: orange; padding: 10px; border-radius: 5px; }
+    .msg-error { color: white; background-color: red; padding: 10px; border-radius: 5px; }
+    .msg-info { color: white; background-color: blue; padding: 10px; border-radius: 5px; }
+    nav a {padding: 10px ; }
+{% comment %}
+    border: 2px solid #cce5cc;   /* soft green border *
+    background: #f6fff6;         /* very light green background *
+    color: #225522;              /* dark green text *
+.error {
+    color: #8b0000;              /* dark red *
+    background: #ffe6e6;         /* pale red background *
+    border-left: 4px solid #cc0000; /* red */
+{% endcomment %}
+</style>
+</head>
+<body>
+    <nav>
+        <a href="/">Home:</a><a href="/CFE">Gestion CFE</a>/<a href="/LFR">LFR</a>/<a href="/CFT">CFT</a>
+        &mdash; <a href="/top10">Records de participation</a>
+        &mdash; <a href="/clubs">Liste des clubs</a>
+{% for link in nav_links %}
+         &mdash; <a href="{{link.url}}">{{link.text}}</a>
+{% endfor %}
+    <span style="float:right;">
+    {% if user.is_authenticated %}
+        <a href="/admin/">[{{ user.username }}]</a> - <a href="/admin/logout/">[logout]</a>
+    {% else %}
+        <a href="/admin/login/?next={{ request.path }}"> [login] </a>
+    {% endif %}
+    </span>
+    </nav>
+<div class="container mt-3">
+    {% for message in messages %}
+    <div class="msg-{{ message.tags }}">{{ message }}</div>
+  {% endfor %}
+    <div id="content">
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>

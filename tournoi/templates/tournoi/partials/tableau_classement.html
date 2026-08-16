@@ -1,0 +1,16 @@
+{# "tournoi/partials/tableau_classement.html" : needs `headers`, `rows` #}
+<table><thead><tr><th>n°<th>Club{% for club in clubs %}<th>{{club.abbreviation|default:club.name|slice:":3"}}</th>{% endfor %}
+    <th>F</th><th>Pts</th><th>V</th><th>D</th><th>N</th><th>SB</th><th>MA</th></tr>
+  </thead>
+  <tbody>{% for row in rows  %}
+    <tr><td><strong>{{ row.no }}</strong></td><td><strong>{{ row.club_name }}</strong></td>
+
+                <!-- Dynamically generate the cells for this row -->
+                {% for score in row.scores %}
+                    <td>{{ score }}</td>
+                {% endfor %}
+
+                <td><strong>{{ row.total_points }}</strong></td>
+    </tr>{% endfor %}
+ </tbody>
+</table>

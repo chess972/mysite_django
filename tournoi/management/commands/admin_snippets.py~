@@ -1,0 +1,57 @@
+'''
+    tournoi/management/commands/admin_snippets.py - (c) 2026 by MFH 
+    Usage:
+        python manage.py admin_snippets
+    last update: 2.8.2026
+    ADMIN SNIPPETS :
+    - define all_clubs, all_matches
+    - do_rename_clubs(), name_matches, get_club(), ...
+'''
+from tournoi.models import Club,Matches
+renames={
+    "La Dame Noire": "Montigny-le-Bretonneux",
+    "Le Plateau de Gergovie": "Clermont-Ferrand",
+    "French Antilles": "Antilles Françaises",
+    "CHAMBERY SAVOIE ECHECS": "Chambéry",
+    "La Tour Infernale": "Isbergues",
+}
+all_clubs = Club.objects.all()
+def do_rename_clubs():
+    for c in all_clubs:
+        name = c.name
+        if name.startswith("Team"): name = name[5:] # this and next may both apply
+        if name.endswith("Metropole"): name = name[:-10]
+        elif name.startswith("K6 "): c.name = "Cassis"
+        elif name.startswith("Fédération "): c.name = "Tahiti"
+        elif name.lower().endswith("checs"): # échecs ; Echecs ; ECHECS ; ...
+            name = c.name[:-7].strip()
+        elif name.endswith("Massilia"): c.name = "Marseille"
+        elif name.endswith("Equipa Tolosa"): c.name = "Toulouse"
+        elif name in renames: name = renames[name]
+        elif name == c.name: continue
+        print(f"renaming '{c.name}' =>", name := name.strip(" -"))
+        c.name = name
+        c.save()
+'''    
+    for k,v in renames.items():
+        try: c=all_clubs.get(name=k); c.name=v; c.save()
+        except Exception as e: print(f"Skipped {k,v}: {e}") 
+'''
+all_matches = Match.objects.all()
+def name_matches():
+    updated_count=0
+    for m in all_matches:
+        if not m.name and m.raw_data and 'name' in m.raw_data:
+            m.name = m.raw_data['name']
+            m.save() ; print(f"updated match {m.id}'s name to {m.name}")
+            updated_count += 1
+    print("Done - number of updates:",updated_count)
+
+def get_club(name): # avoid "crash" if name is duplicate or nonexistant
+    return Club.objects.filter(name=name).first()
+    '''
+    if c:
+        print(f"Found it! {c.name}")
+    else:
+        print("No club found with that name.")
+    '''

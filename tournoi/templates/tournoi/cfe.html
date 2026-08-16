@@ -1,0 +1,84 @@
+<!-- tournoi/templates/tournoi/cfe.html -->
+{% extends "base.html" %}
+{% block title %}Gestion CFE-CFT-LFR - (c) 2025 - 2026 by MFH{% endblock %}
+{% block content %}
+<style>
+    dt { font-weight: bold; }
+    .selected { font-weight: bold; background: lime; border: 1px solid #00FF00; padding-left: 1em; padding-right: 1em;}
+    .hidden { font-style: italic; background: gray; border: 1px solid #666; padding-left: 1em; padding-right: 1em;}
+}
+</style>
+
+<h1>Gestion CFE-CFT-LFR{% if pattern %} (catégorie {{pattern}}){% endif %}</h1>
+<dl>
+<dt> Compétitions: [choisir la compétition à analyser - détails - supprimer - ajouter]
+<dd>
+<form method="post">
+    {% csrf_token %}  <!-- Mandatory security tag in Django POST forms -->
+    {% for comp in competitions %}
+      {% if not comp.hidden or user.is_superuser %}
+        <span class="{% if comp.hidden %}hidden {% endif %}{% if request.session.compet == comp.name %}selected{% endif %}">
+        <button name="choix_compet" value="{{ comp.name }}" title="sélectionner">{{ comp.name }}</button>
+        <a href="{% url "tournoi:classement" compet=comp.name %}" title="cliquer pour voir le classement">Tableau classement</a>
+        {% if user.is_superuser %}
+        <a href="/competition/{{comp.name}}/" title="choisir & afficher détails">Détails & mise à jour</a>
+        <button name="del_compet" value="{{ comp.name }}" title="cacher cette compet dans la liste">[<font color="red">X</font>]</button>
+        {% endif %}{# user.is_staff #}
+        </span> &nbsp;
+      {% endif %}{# not comp.hidden or user.is_superuser #}<br/>
+    {% endfor %}
+{% if user.is_staff %}
+</form>{# new form so that "enter" submits "Ajouter", not select 1st compet #}
+<form method="post">
+    {% csrf_token %}
+    <button name="ajout_compet" value="ajouter">Ajouter:</button>
+    <input name="new_compet" type="text" title="Sigle de la compèt, p.ex. 'CFE 2026 D1'"/>
+    URL:&nbsp;<input name="compet_url" size="80" title="URL de la page web qui donne les rencontres de la compèt"/>
+{% endif %}{# user.is_staff #}
+</form>
+
+{% if selected_compet %}
+<br/>
+<dt>Compétition choisie: {#{{ selected_compet.name }} -- <a href="{% url 'tournoi:comp-detail' compet=selected_compet.name %}">Cliquer ici pour détails / actualisation</a>#}
+<dd>
+    {% include 'tournoi/partials/competition_table.html' with comp=selected_compet matches=selected_compet.matches.all %}
+<dt> Groupes au sein de cette compétition :
+<dd> ...
+
+<dt> Tableau de classement pour la compétition '{{ selected_compet }}' sélectionnée ci-dessus:
+<dd>
+    <form method="post" action={% url 'tournoi:classement' compet=selected_compet %}>
+        {% csrf_token %}
+        <button name="tableau" value="{{ selected_compet }}">
+            Etablir et afficher le tableau de classement pour la compétition '{{ selected_compet }}'.
+        </button>
+    </form>
+
+{% endif %}
+
+<dt> Clubs:
+<dd>
+        {% if user.is_staff %}{#<!-- Homepage Form (Submits via GET to preview/confirm first) -->#}
+    <form action="{% url 'tournoi:rename_club' %}" method="get" class="form-inline">
+    <button type="submit" class="btn btn-warning">Renommer le club</button>
+    <input type="text" name="old_name" placeholder="Nom actuel du club" required> en
+    <input type="text" name="new_name" placeholder="Nouveau nom" required>
+</form>
+        {% endif %}{# user.is_staff #}
+<pre>
+(2) - Visualiser et/ou actualiser la liste des 48 clubs participants
+(5) - Afficher la liste des joueurs pour un club donné.
+(6) - Afficher la liste des rencontres pour chaque joueur d'un club donné.
+(9) - Liste des rencontres perdues au temps pour chaque joueur d'un club donné.
+</pre>
+</dd>
+
+<dt> Joueurs:
+<dd>
+<pre>
+(3) - Afficher les joueurs multi-équipes
+(4) - Afficher la liste des rencontres en cours et à venir pour un joueur donné.
+(8) - Afficher la liste des rencontres perdues au temps pour un joueur donné.
+</pre>
+</dl>
+{% endblock %}

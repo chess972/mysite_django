@@ -1,0 +1,7 @@
+{#<!-- tournoi/templates/tournoi/classement.html : needs `compet`, `classements`-->#}
+{% extends 'base.html' %}
+{% block content %}
+<h1>Classement pour <a href="{{compet.url}}">{{compet}}</a></h1>
+{% for classement in classements %}{{classement|safe}}
+{% endfor %}
+{% endblock content %}

@@ -1,0 +1,25 @@
+{#<!-- tournoi/templates/tournoi/top10.html -->#}
+{% extends 'base.html' %}
+{% block content %}
+<h1>Records de participation : rencontres ayant eu le plus de parties</h1>
+{% for code,section in sections.items %}
+    <h2>Top 10 {{ section.name }}</h2>
+<table>
+    <thead>
+        <tr><th>Match</th><th>Résultat</th><th>Nombre de joueurs</th><th>Date fin</th></tr>
+    </thead>
+    <tbody>
+{% for match in section.matches %}
+    <tr>
+        <td><a href="{{match.url}}">{{ match.name }}</a></td>
+        <td align=center>{{ match.score_team1 }} - {{ match.score_team2 }}</td>
+        <td align=center>{{ match.num_boards }}</td>
+        <td>{{ match.end_date|date:'Y-m-d'|default:'(en cours)' }}</td>
+    </tr>
+{% empty %}
+    <tr><td colspan="2">Aucun enregistrement trouvé.</td></tr>
+{% endfor %}{# match #}
+    </tbody>
+</table>
+{% endfor %}{# section #}
+{% endblock content %}

@@ -1,0 +1,8 @@
+{# tournoi/templates/tournoi/simple_output.html : output  `title` (wrapped in H1), `lines` and/or `output`. #}
+{% extends 'base.html' %}
+{% block content %}
+{% if title %}<h1>{{title|safe}}</h1>
+{% endif %}{% for line in lines %}{{line|safe}}
+{% endfor %}{% if output %}{{output|safe}}
+{% endif %}
+{% endblock content %}

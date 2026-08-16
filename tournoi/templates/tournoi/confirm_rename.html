@@ -1,0 +1,33 @@
+<!-- tournoi/templates/tournoi/confirm_rename.html -->
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+    <h2>Confirmation de modification</h2>
+    <form method="post" onsubmit="prepareSubmit(this);" action="{% url 'tournoi:rename_club' %}">
+    <p>Voulez-vous vraiment renommer le club
+    "<strong id="old_name_new" contenteditable >{{ old_name }}</strong>" en
+    "<strong id="new_name_new" contenteditable >{{ new_name }}</strong>" ?</p>
+        {% csrf_token %}
+        <input type="hidden" name="old_name" value="{{ old_name }}">
+        <input type="hidden" name="new_name" value="{{ new_name }}">
+        <input type="hidden" name="dont_ask_again" value="1">
+        <button type="submit" class="btn btn-danger">Oui, renommer</button>
+        <a href="{% url 'tournoi:home' %}" class="btn btn-secondary">Annuler</a>
+    </form>
+<script>
+    function prepareSubmit(form){
+        console.log("submitting...");
+        const aa = form.elements["dont_ask_again"];
+        console.log("dont_ask_again = "+aa.value);
+        for (const tag of ['old_name','new_name']) {
+            const a = form.elements[tag], b = document.getElementById(tag+"_new");
+            if ( a.value != b.innerText ) {
+                console.log(tag+" was changed from "+a.value+" to "+b.innerText);
+                a.value = b.innerText ; aa.value = '0';
+                console.log("now dont_ask_again = "+aa.value);
+            }
+        }
+    }
+</script>
+</div>
+{% endblock %}
