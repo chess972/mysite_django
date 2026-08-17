@@ -47,8 +47,7 @@ function prepareSubmit(formElement) {
     <td class="team2">{{ match.team2.name|default:"? team 2 ?" }}</td>
     <td class="score">{{ match.score_team1 }} - {{ match.score_team2 }}</td>
     <td class="remaining">{{ match.remaining }}</td>
-</tr>
-    {% endfor %}
+</tr>{% endfor %}
     </table>{% if user.is_staff %}
         {% if matches_to_update %}
     <button id="update-btn" onclick="startUpdateLoop()">Actualiser les rencontres</button>

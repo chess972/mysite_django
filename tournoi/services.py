@@ -321,7 +321,8 @@ def calcul_classement(compet:str):
                 list({ s[-1].id for club_id in cl.classement
                                 for s in cl.scores[club_id].values()}),
             } for cl in c]
-        if data.get('save'): compet.save(update_fields=['raw_data'])
+        if data.get('save'):
+            compet.save(update_fields=['raw_data'])
     return c
 '''
 "classements": [{"title": "D1 top final", "match_ids": ["s", "a", "i", "m"]},

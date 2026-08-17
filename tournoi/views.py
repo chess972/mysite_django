@@ -1,5 +1,6 @@
 # tournoi/views.py - (c) 2026 by MFH
 from django.shortcuts import render, get_object_or_404, redirect
+from django.urls import reverse
 #from django.core.cache import cache
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
@@ -218,7 +219,7 @@ def update_single_match(request, compet, match_id):
 
 #    path('', views.homepage, name='home'),
 #    path('<str:pattern>/', views.homepage, name='home'),
-def homepage(request, pattern=None):
+def homepage(request, pattern=''):
     if request.method == "POST":
         # 1. Ajouter une compétition
         if 'ajout_compet' in request.POST:
@@ -266,7 +267,8 @@ def homepage(request, pattern=None):
             # make_table(tableau_target) ...
             messages.success(request, f"Tableau calculé pour {tableau_target}")
 
-        return redirect('tournoi:home')  # Redirect prevents double form submission on refresh!
+        return redirect('tournoi:home'  # Redirect prevents double form submission on refresh!
+            if not pattern else f"{reverse('tournoi:home')}{pattern}/")
     # GET Request: was a particular competition selected?
     if pattern:
         # allow "sluggish" competition names
@@ -277,11 +279,14 @@ def homepage(request, pattern=None):
     else:
         competitions = Competition.objects.all()
     # Prepare data for rendering
-    selected_name = request.session.get('compet')
-    selected_compet = competitions.filter(name=selected_name).first() if selected_name else None
-
+    matches_to_update = selected_compet = None
+    if selected_name := request.session.get('compet'):
+        if selected_compet := competitions.filter(name=selected_name).first():
+            if request.user.is_superuser:
+                matches_to_update = list(selected_compet.matches.exclude(
+                    status='finished').values_list('id', flat=True))
     context = {
         'competitions': competitions, 'pattern': vars().get('pattern'),
-        'selected_compet': selected_compet,
+        'selected_compet': selected_compet, 'matches_to_update':matches_to_update
     }
     return render(request, 'tournoi/cfe.html', context)

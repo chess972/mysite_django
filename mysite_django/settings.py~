@@ -9,14 +9,13 @@ https://docs.djangoproject.com/en/5.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
-
-# import os # use path lib instead
+# import os
 from pathlib import Path
-#APPEND_SLASH=False # leave this true so that url paths with parameters are recognized
+#APPEND_SLASH=False
 
-# To build paths inside the project, use: BASE_DIR / 'subdir'.
-# On PythonAnywhere, this file is /home/MFH/mysite_django/mysite_django/settings.py
-# so BASE_DIR is '/home/MFH/mysite_django', but this may change in GitHub / Render
+# Build paths inside the project like this: BASE_DIR / 'subdir'.
+# on PythonAnywhere, this file is /home/MFH/mysite_django/mysite_django/settings.py
+# so BASE_DIR is /home/MFH/, but this may change in GitHub / Render
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -89,7 +88,7 @@ DATABASES = {
     # "(This uses PostgreSQL automatically when deployed on Render,
     #   while falling back to SQLite when running locally.)"
     dj_database_url.config(
-        default='sqlite:///' + BASE_DIR / 'db.sqlite3',
+        default='sqlite:///' + os.path.join(BASE_DIR, 'db.sqlite3'),
         conn_max_age=600
     )
 }
