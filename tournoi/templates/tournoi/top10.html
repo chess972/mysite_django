@@ -2,18 +2,32 @@
 {% extends 'base.html' %}
 {% block content %}
 <h1>Records de participation : rencontres ayant eu le plus de parties</h1>
+Ces records de participation complètent <b> les podiums officiels des trois compétitions&nbsp;:</b>
+<ul>
+<li><a href="https://www.chess.com/fr/clubs/forum/view/arc-de-triomphe">
+    L'Arc de triomphe de la LFR</a>
+</li>
+<li><a href="https://www.chess.com/fr/clubs/forum/view/temple-de-la-renommee-du-cfe">
+    Le Temple de la renommée du CFE</a>
+</li>
+<li><a href="https://www.chess.com/fr/clubs/forum/view/hall-de-la-gloire-2">
+    Le Hall de la gloire de la CFT</a>
+</li>
+</ul>
+
+<style> td {padding:6pt} </style>
 {% for code,section in sections.items %}
     <h2>Top 10 {{ section.name }}</h2>
-<table>
+<table border=1 cellspacing=0>
     <thead>
-        <tr><th>Match</th><th>Résultat</th><th>Nombre de joueurs</th><th>Date fin</th></tr>
+        <tr><th>Nombre de joueurs</th><th>Match</th><th>Résultat</th><th>Date fin</th></tr>
     </thead>
     <tbody>
 {% for match in section.matches %}
     <tr>
+        <td align=center>{{ match.num_boards }}</td>
         <td><a href="{{match.url}}">{{ match.name }}</a></td>
         <td align=center>{{ match.score_team1 }} - {{ match.score_team2 }}</td>
-        <td align=center>{{ match.num_boards }}</td>
         <td>{{ match.end_date|date:'Y-m-d'|default:'(en cours)' }}</td>
     </tr>
 {% empty %}

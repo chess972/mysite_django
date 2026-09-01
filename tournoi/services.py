@@ -1,25 +1,120 @@
 # tournoi/services.py
-from .models import Match,Club  # Import your models here if the scraper needs to save directly
+from .models import Competition,Match,Club  # Import your models here if the scraper needs to save directly
 import re, requests
+from django.db import IntegrityError
 
-aliases = { 'normandie': 'echiquier-de-normandie',
-            'paris-neuf-trois': 'saint-denis-93-chess',
-        }
+aliases = { # URLs: https://www.chess.com/club/xxx
+    'normandie': # "Ce club a été désactivé." (en avril 2025 ?)
+        'echiquier-de-normandie', # créé 15.4.2025
+    'paris-neuf-trois': 'saint-denis-93-chess',	    # créé 1.6.2024, renommé en juin 2026
+    'team-grand-est-1': # a participé en CFE 2022
+        'region-grand-est',
+    #'isula-corsica':   # créé 16.5.2021, "Destiné à participer...dans les futures éditions...CFE"
+    #   'corsica-chess-team-squadra-corsa-di-scacchi',  # créé 10.7.2026 . Les deux sont actifs
+    #"team-orleans":    # créé 23.11.2022
+    #   "team-orleans-le-cavalier-de-jeanne",   # créé 14.7.2026 mais l'ancien existe toujours
+    #"les-cavaliers-de-brume":  # créé 23 Nov 2022. # voir aussi : https://www.echecs.asso.fr/FicheClub.aspx?Ref=3251
+    #                   et : https://annuaire-entreprises.data.gouv.fr/entreprise/les-cavaliers-de-brume-934803701
+    #   "spm-975-chess-club",   # créé 7 Aug 2026
+    #"la-reine-d-anjou": "team-pays-de-la-loire", #  créé Jul 16, 2021 ; renommé en juillet(?) 2026
+}
 
 headers = {'User-Agent': 'CFE_LFR_CFT_Tournament_management_App (contact: echecs972@gmail.com)'}
 
-def update_from_api(item):
-    """Forks item (Club | Match), update the raw_data field from the api.chess.com, if necessary.
-    Returns True if updated, False if not, str or exception on failure."""
+def compute_multiteam(pattern=''):
+    """Faire la liste des joueurs multi-équipe."""
+    multi_team_players=[] ; club_prefix = "https://www.chess.com/club/"
+    ALIASES = { club_prefix+a: club_prefix+b for a,b in aliases.items() }
+    players = {} ; match_count = 0
+    for match in Match.objects.filter(competition__name__icontains=pattern):
+        match_count += 1
+        if (d := match.raw_data) or update_from_api(match) and (d := match.raw_data):
+            for team in d.get('teams',{}).values():
+                if (URL := team['url'])in ALIASES:
+                    URL = ALIASES.get(URL) ; CLUB_NAME = ''
+                else: CLUB_NAME = team['name']
+                #team_id = URL, team['name']
+                for player in team.get('players',()):
+                    if player_teams := players.get( name := player['username'] ):
+                        if this_team := player_teams.get( URL ):
+                            this_team .append( match )
+                        else:
+                            this_team = player_teams[ URL ] = [ match ]
+                            if len(player_teams)==2: multi_team_players.append( name )
+                    else: players[name] = { URL: (this_team := [match]) }
+                    if CLUB_NAME and not isinstance(this_team[0], str):
+                        this_team.insert(0, CLUB_NAME)
+    return [ MTP( player, players[player] ) for player in multi_team_players ]
+from typing import NamedTuple
+class MTP(NamedTuple):
+    player: str; teams: dict
+    def __str__(self):
+        output = [f'<dt><a href="https://www.chess.com/member/{self.player}">{self.player}</a>:']
+        for club_url, matches in self.teams.items():
+            club_name = matches.pop(0) if isinstance(matches[0], str) else club_url.split('/')[-1]
+            output.append( f'<dd><a href="{club_url}">{club_name}</a>:' )
+            output.append( ', '.join(m.linkedname()for m in matches) )
+        return'\n'.join(output)
+
+def compute_timeouts(pattern):
+    """Return a list[ (match, timeouts) ] for the competitions whose name matches
+    `pattern`, where timeouts is a dict {club_id: [player_id's...]}."""
+    timeouts = []
+    for match in Match.objects.filter(competition__name__icontains=pattern):
+        if (d := match.raw_data) or update_from_api(match) and (d := match.raw_data):
+            if d['status']=='registration': continue # consider only finished & ongoing
+            if (t := d.get('timeouts')) is None:
+                t = {} # make a dict for this match
+                for team in d.get('teams', {}).values():
+                    for p in team.get('players',()):
+                        if 'timeout'in p.values():
+                            if (club_id := team['@id'].split('/')[-1]) not in t: t[club_id]=[]
+                            t[club_id].append(p['username'])
+                d['timeouts'] = t
+                if d['status'] == 'finished':
+                    match.status = 'finished'
+                    match.save()
+            if t: timeouts.append( (match, t) )
+    return timeouts
+
+# used by views.bookmarklet_receiver() and views.extract_matches()
+def create_matches(match_ids: list[str], competition: str|Competition) -> list[str] | None:
+    """Create the Match items with id's given in the list, linked to competition.
+    Return a list of warnings (duplicate match id's). If competition isn't found, return None."""
+    if isinstance(competition, str):
+        competition = Competition.objects.filter(name=competition).first()
+        if not competition: return
+    warnings = []
+    for m_id in match_ids:
+        # get_or_create prevents duplicates if the button is clicked twice
+        # BUT we can get an exception if the same match is linked to a different competition!
+        try: Match.objects.get_or_create( id=m_id, competition=competition,
+                defaults={'name': '', 'status': ''} ) # or: status=='unknown' ?
+        except IntegrityError: m_id = '0'+m_id ; Match.objects.get_or_create(
+                id=m_id, competition=competition, defaults={'name': '', 'status': ''}
+            );  warnings.append(f"Match '{m_id}' en double - informez un admin!")
+    return warnings
+
+def update_from_api(item, exclude='description'):
+    """Works for item (Club | Match), update the raw_data field from the api.chess.com, if necessary.
+    Returns True if updated, False if not, str or exception on failure.
+    `exclude` will remove the given key(s) from API data."""
+    if isinstance(exclude, str) or exclude and not hasattr(exclude, '__iter__'): exclude = exclude,
     try: # fetch data from api.chess.com
         response = requests.get(item.api, headers=headers)
         if response.status_code != 200: return "Failed to connect to API"
         api_data = response.json()
-        if item.raw_data != api_data:
-            item.raw_data = api_data ; item.save(update_fields=['raw_data'])
-            return True
-        return False
-    except Exception as e: return e
+        for key in exclude or (): api_data.pop(key, None)
+        if not item.raw_data: item.raw_data={}
+        if not all(item.raw_data.get(k) == v for k,v in api_data.items()):
+            if not item.raw_data: item.raw_data = {}
+            item.raw_data |= api_data # don't remove "custom" fields added by hand
+            if 'name' in api_data and not item.name: # no more needed? (cf. models.save()
+                item.name = api_data['name']
+            item.save(update_fields=['name','raw_data'])
+            return True # OK: updated
+        return False # no update made
+    except Exception as e: return e # error occurred
 
 def update_match(match):
     """Fetches data from Chess.com API and updates the Match object.
@@ -49,12 +144,61 @@ def update_match(match):
                 match.status = api_data['status']; update_fields += ["status"]
             match.save(update_fields=update_fields) # and return None
 
-class TD(str):
-    def __new__(c, text, cls='', link=''):
-        s = super().__new__(c, text); s.cls=cls ; s.link=link; return s
-    def __str__(self): return self.classify(f' class="{self.cls}"'if self.cls else'')
-    def classify(self, c): return f"<td{c}>{self.linkify(str.__str__(self))}</td>"
-    def linkify(self, s): return f'<a href="{self.link}">{s}</a>' if self.link else s
+#from __future__ import annotations # must be at top of file
+Classement = dict # defined later
+# This is called from views.classement :
+def calcul_classement(compet:str) -> list[str | Classement]:
+    """Return [error_message: str] or a list[Classement], where each Classement
+    corresponds to an independent group of clubs competing only among themselves.
+    (These groups form a partition of all clubs taking part in the competition.)
+    Each Classement has entries and attributes (where N is the size of the group):
+    headers = ['#', 'Club', ABBR.1,...,ABBR.N, 'F', 'Pts', 'V', 'D', 'N', 'MA', 'SB']
+    classement = { club_id: club } ordered by result (same order as ABBR.1..N)
+    result = { club_id: scores } where scores = { opponent_id: (wins,loss,remain,match) }
+    rows = (row.k for k = 1, ..., len(clubs)) in order of ranking
+        row.k: [k, club, score.k.vs.1,...,score.k.vs.N, F.k, ... ]
+    NB: If the competion is partitioned in multiple groups, self.result and self.rows
+    may be the same for all, so 'classement' must be used to find the relevant entries.
+    The __str__ method returns HTML code for the table. See class Classement for further details.
+    """
+    if isinstance(compet, str): # shouldn't happen - already fetched from DB in views
+        compet = get_object_or_404(Competition, name=compet)
+    if not compet: return[f"Compétition inconnue ou non trouvée."]
+    if not(data := compet.raw_data): data = compet.raw_data = {}
+
+    # (liste des) classements déjà connue: renvoyer.
+    # (Ils seront recalculés quand même.)
+    # Dans (raw_)data, les classements sont des listes de match_id,
+    # ou des dicts avec une entrée match_ids et une entrée "title".
+    if classements := data.get('classements'):
+        return [Classement(c)for c in classements]
+
+    # sinon, voir si la liste des match est déjà stockée
+    if not(matches := data.get('matches')):
+        if matches := [m.id for m in Match.objects.filter(competition=compet)]:
+            data['matches'] = matches ; compet.save(update_fields = ['raw_data'])
+        else:
+            return[f"Le tableau de classement ne peut être établi, il manque la liste des rencontres de la compétition {compet!r} !"]
+    # sinon, voir si des groupes sont spécifiés.
+    # Les groupes peuvent être des listes de match_id,
+    # ou des dict avec typiquement une entrée "match_ids" et une entrée "title".
+
+    classement = Classement(*matches)
+    if t := data.get('titles'): classement['titles'] = t # titles are given
+    elif t := data.get('title'): classement['title'] = t # titles will be computed from "title"
+    # this innocent line creates the list of all "classements" !
+    if len(c := classement.classements) > 1:
+        # data['classements'] = ; compet.save(update_fields=['raw_data'])
+        if o := data.get("order"): # reorder
+            c = classement['classements'] = [c[j] for j in o]
+        # now "partition" the match_ids and save the "split" classements in the database.
+        data['classements'] = [{'title': cl.title, 'match_ids':
+                list({ s[-1].id for club_id in cl.classement
+                                for s in cl.scores[club_id].values()}),
+            } for cl in c]
+        if data.get('save'):
+            compet.save(update_fields=['raw_data'])
+    return c
 
 class Classement(dict):
     """La structure classement calcule tout ce qu'il faut pour afficher
@@ -83,6 +227,12 @@ class Classement(dict):
     La structure est un dict dont les entrées peuvent être obtenues aussi comme
     attribut, et sont calculées si pas encore présents:
         self.xxx = self['xxx'] = self.get('xxx', self.compute_xxx()).
+
+    Methods:
+    __str__ returns HTML output for the table.
+    __repr__ returns a minimal representation, based on just the match_ids
+    compute_xxx computes the entry xxx (among those listed above) if it doesn't exist.
+
     """
     def __getattr__(self, key): # called (only) if the attribute doesn't exist
         if key not in self: # compute & store it
@@ -99,25 +249,53 @@ class Classement(dict):
                     ) else tuple(args[0]) #  list or generator (or... ?)
         self |= kwargs
 
-    def __str__(self): return f"""{self.style}
-{f"<h2>{self.title}</h2>\n"if self.get('title') else''}{self.get('comment','')}
-<table border=1 cellspacing=0>
-<thead><tr><th>{'</th><th>'.join(self.headers)}</th></tr></thead>
-<tbody><tr>{'</tr>\n<tr>'.join(''.join(str(td)for td in r)for r in self.rows)}</tr>
-</tbody></table>{self.explication}
-{self.footnote}"""
-
-    style="""<style>th {min-width: 2em} td {text-align:center; padding: 3pt}
+    style="""<style>th {min-width: 2em} td {text-align:center; padding: 3pt; white-space: nowrap;}
 .self {background: black} .penalty {background: salmon} .unkn {background: orange}
 .won {background: lightgreen} .lost {background: #ffbbbb} .draw {background: lightyellow}
 </style>""" # can be set to '' if additional tables are displayed on the same pages
+    # was moved to templates/tournoi/classement.html
+    # BUT: that won't work if displayed on another web page!
+
+    def __str__(self):
+        output = [ self.style ] if self.style else []
+        if t := self.get('title'):          output.append( f"<h2>{t}</h2>" )
+        if s := self.get('start_date'):     output.append( f"Démarrage le {s}" )
+        if c := self.get('cutoff_date'):    output.append( f"{' &mdash; ' if s else''}Cut-off le {c}" )
+        if t := self.get('comment'):        output.append( f"<p>{t}</p>" )
+        output.extend(( "<table border=1 cellspacing=0><thead><tr><th>",
+                        '</th><th>'.join(self.headers), "</th></tr></thead>\n<tbody><tr>",
+                        '</tr>\n<tr>'.join( ''.join(map(str, r)) for r in self.rows ),
+                        "</tr></tbody></table>" ))
+        # Légende : seulement si plus que 2 clubs (1 match)
+        if len(self.classement) > 2:
+            draw = ', <span class="draw">jaune pour nulle</span>'if any( s[0]-s[1] == 0 == s[2]
+                for c in self.classement for s in self.scores[c].values() )else ''
+            unkn = ', <span class="unkn">orange = encore indécis</span>'if any(0 < s[2] >= abs(s[0]-s[1])
+                for c in self.classement for s in self.scores[c].values() )else ''
+            output.append( f"""<p>Rappel: Le classement s'effectue par
+<b>P</b><small>oin</small><b>ts</b> (= 2&#8239;&times;&#8239;<b>V</b><small>ictoires</small> +
+1&#8239;&times;&#8239;<b>N</b><small>ulles</small> + 0&#8239;&times;&#8239;<b>D</b><small>éfaites</small>),
+puis par <a href="https://fr.wikipedia.org/wiki/Syst%C3%A8me_Sonneborn-Berger"
+><b>S</b><small>onneborn</small>-<b>B</b><small>erger (cf. Wikipedia)</small></a>,
+et enfin par <br/> &laquo;&#8239;<b>M</b><small>atch</small>-<b>A</b><small>verage</small>&#8239;&raquo;
+(parties gagnées - parties perdues). Les résultats des rencontres sont de la forme (g, p) ou (g, p, r),
+où g/p/r = parties <br/> gagnées/perdues/restantes, <span class="won">fond vert pour rencontre gagnée</span>,
+<span class="lost">fond rose pour rencontre perdue</span>{draw}{unkn}.</p>
+""")
+        # "footnote" : explain penalty
+        if any(s[0] < 0 for c in self.classement for s in self.scores.get(c,{}).values()):
+            output.append( """<p><b>N.B.:</b>
+Un <span class="penalty">score négatif sur fond "saumon"</span> signifie que l'équipe qui n'a pas fourni<br/>
+assez de joueurs s'est vu attribuer une pénalité pour la rencontre annulée.</p>""" )
+        return "\n".join(output)
 
     # If there is a unique group, there should be no (sub)'title'.
     # If there are several groups, they use title = titles[i], i = 0 .. len(groups)-1,
     #  where the list 'titles' can be given, or it is computed as follows:
     def compute_titles(self):
-        if not (title := self.get('title', "Groupe ")).endswith(' '): title += " "
-        return [f"{title}{n+1}"for n in range(len(self.groups))]
+        if not (title := self.get('title')):
+            title = "Rencontre" if all(len(g)<=2 for g in self.groups) else "Groupe"
+        return [f"{title} {n+1}"for n in range(len(self.groups))]
 
     # The headers have a colum with its abbreviation for each club in self.classement
     # Therefore, if a compet is split in several groups => classements, make sure it
@@ -138,30 +316,6 @@ class Classement(dict):
                       if(s := rr['scores'].get(opp)) else
                       TD('-',cls='self' if opp==club_id else None) for opp in c),
                     *(TD(rr[k]) for k in h[-7:]) ] # 'F', 'Pts', ...
-
-    @property
-    def explication(self):
-        if len(self.classement) < 3: return ''
-        draw = ', <span class="draw">jaune pour nulle</span>'if any( s[0]-s[1] == 0 == s[2]
-            for c in self.classement for s in self.scores[c].values() )else ''
-        unkn = ', <span class="unkn">orange = encore indécis</span>'if any(0 < s[2] >= abs(s[0]-s[1])
-            for c in self.classement for s in self.scores[c].values() )else ''
-        return f"""<p>Rappel: Le classement s'effectue par
-<b>P</b><small>oin</small><b>ts</b> (= 2&#8239;&times;&#8239;<b>V</b><small>ictoires</small> +
-1&#8239;&times;&#8239;<b>N</b><small>ulles</small> + 0&#8239;&times;&#8239;<b>D</b><small>éfaites</small>),
-puis par <a href="https://fr.wikipedia.org/wiki/Syst%C3%A8me_Sonneborn-Berger"
-><b>S</b><small>onneborn</small>-<b>B</b><small>erger (cf. Wikipedia)</small></a>,
-et enfin par <br/> &laquo;&#8239;<b>M</b><small>atch</small>-<b>A</b><small>verage</small>&#8239;&raquo;
-(parties gagnées - parties perdues). Les résultats des rencontres sont de la forme (g, p) ou (g, p, r),
-où g/p/r = parties <br/> gagnées/perdues/restantes, <span class="won">fond vert pour rencontre gagnée</span>,
-<span class="lost">fond rose pour rencontre perdue</span>{draw}{unkn}.</p>
-"""
-    footnote_cancelled = """<p><b>N.B.:</b>
-Un <span class="penalty">score négatif sur fond "saumon"</span> signifie que l'équipe qui n'a pas fourni<br/>
-assez de joueurs s'est vu attribuer une pénalité pour la rencontre annulée.</p>"""
-    @property
-    def footnote(self): return self.footnote_cancelled if any(s[0] < 0
-        for c in self.classement for s in self.scores.get(c,()).values()) else ''
 
     def compute_classements(self):
         """Etablir la liste des classements, s'il y a plusieurs groupes (sinon,
@@ -276,64 +430,18 @@ which compute against each other."""
         )}{f',title={self.title!r}' if self.get('title') else ''})"""
 #class Classement
 
-def calcul_classement(compet:str):
-    """Return a dict corresponding to the 'classement' table(s).
-    As of now, this function returns a list[Classement] ; rationale:
-    many competitions fall apart into independent groups.
-    Each Classement has entries and methods:
-    headers = ['#', 'Club', ABBR.1,...,ABBR.N, 'F', 'Pts', 'V', 'D', 'N', 'MA', 'SB']
-    classement = { club_id: club } ordered by result
-    result = { club_id: scores } where scores = { opponent_id: (wins,loss,remain,match) }
-    rows = (row.k for k = 1, ..., len(clubs)) in order of ranking
-        row.k: [k, club, score.k.vs.1,...,score.k.vs.N, F.k, ... ]
-    """
-    if isinstance(compet, str): # shouldn't happen - already fetched from DB in views
-        compet = get_object_or_404(Competition, name=compet)
-    if not compet: return[f"Compétition inconnue ou non trouvée."]
-    if not(data := compet.raw_data): data = compet.raw_data = {}
+class TD(str): # used in Classement.rows
+    """This is a helper class, which allows to attach attributes 'link' and 'cls'
+    to some text, so that str(text) = '<td class="cls"><a href="link">text</a></td>'."""
+    def __new__(c, text, cls='', link=''):
+        s = super().__new__(c, text); s.cls=cls ; s.link=link; return s
+    def __str__(self): return self.classify(f' class="{self.cls}"'if self.cls else'')
+    def classify(self, c): return f"<td{c}>{self.linkify(str.__str__(self))}</td>"
+    def linkify(self, s): return f'<a href="{self.link}">{s}</a>' if self.link else s
 
-    # (liste des) classements déjà connue: renvoyer.
-    # (Ils seront recalculés quand même.)
-    # Dans (raw_)data, les classements sont des listes de match_id,
-    # ou des dicts avec une entrée match_ids et une entrée "title".
-    if classements := data.get('classements'):
-        return [Classement(c)for c in classements]
-
-    # sinon, voir si la liste des match est déjà stockée
-    if not(matches := data.get('matches')):
-        if matches := [m.id for m in Match.objects.filter(competition=compet)]:
-            data['matches'] = matches ; compet.save(update_fields = ['raw_data'])
-        else:
-            return[f"Définition de la compétition {compet!r} incomplète - Le classement ne peut être établi !"]
-    # sinon, voir si des groupes sont spécifiés.
-    # Les groupes peuvent être des listes de match_id,
-    # ou des dict avec typiquement une entrée "match_ids" et une entrée "title".
-    classement = Classement(*matches)
-    if t := data.get('titles'): classement['titles'] = t # titles are given
-    elif t := data.get('title'): classement['title'] = t # titles will be computed from "title"
-    # this innocent line creates the list of all "classements" !
-    if len(c := classement.classements) > 1:
-        # data['classements'] = ; compet.save(update_fields=['raw_data'])
-        if o := data.get("order"): # reorder
-            c = classement['classements'] = [c[j] for j in o]
-        # now "partition" the match_ids and save the "split" classements in the database.
-        data['classements'] = [{'title': cl.title, 'match_ids':
-                list({ s[-1].id for club_id in cl.classement
-                                for s in cl.scores[club_id].values()}),
-            } for cl in c]
-        if data.get('save'):
-            compet.save(update_fields=['raw_data'])
-    return c
-'''
-"classements": [{"title": "D1 top final", "match_ids": ["s", "a", "i", "m"]},
-{"title": "play off D1/D2", "match_ids": ["s", "e"]},
-{"title": "play off D1/D2", "match_ids": ["s", "e", "x"]},
-{"title": "play off D2/D3", "match_ids": ["1", "s", "n"]},
-{"title": "play off D2/D3", "match_ids": ["s", "e", "r"]},
-{"title": "D3", "match_ids": ["1", "g", "o", "e"]}]
-'''
 
 def extract_match_ids_from_HTML(HTML, pattern = "/club/matches/"):
+    # dd is for cutoff_date and debug info
     match_ids = [dd := {'len_HTML': len(HTML), 'num_off':0}] ; cutoff_date = dd
     match_regex = re.compile(f'href=["\']https?://www[.]chess[.]com{pattern}([^"\']+)["\']', re.I)
     cutoff_regex = re.compile(r'cut+[ -]off.+le\s+(\d{2}/\d{2}/20\d{2})', re.I) # IGNORECASE
@@ -345,8 +453,11 @@ def extract_match_ids_from_HTML(HTML, pattern = "/club/matches/"):
     for line in HTML:
         if pattern in line:
             for m_id in match_regex.findall(line):
-                match_ids . append( (m_id.split("/")[-1] if '/' in m_id # remove club name if it was 'inserted'
+                match_ids . append( (m_id.split("/")[idx := -1] if '/' in m_id # remove club name if it was 'inserted'
                                 else m_id).split("?")[0]) # remove query string if present
+                while not match_ids[-1].isdecimal(): # on some older pages there's a trailing "/games"
+                    idx -= 1 # won't work anyways if there was no '/' ...
+                    match_ids[-1]=m_id.split("/")[idx] # fingers crossed... -2 should better work at once
         elif 'off' in line:
             dd['num_off'] += 1
             for m in cutoff_regex.findall(line):

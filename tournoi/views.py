@@ -1,16 +1,210 @@
 # tournoi/views.py - (c) 2026 by MFH
-from django.shortcuts import render, get_object_or_404, redirect
-from django.urls import reverse
-#from django.core.cache import cache
+
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
-from django.http import HttpResponse, JsonResponse
+from django.contrib.auth.decorators import login_required
+#from django.core.cache import cache
+#from django.db import IntegrityError
 from django.db.models import F,Q # for top10
-from datetime import date,datetime # for current_year in top10
+from django.http import HttpResponse, JsonResponse
+from django.shortcuts import render, get_object_or_404, redirect
+from django.urls import reverse
+from django.utils import timezone
+from django.views.decorators.csrf import csrf_exempt
+
 from contextlib import redirect_stdout
+from datetime import date,datetime # for current_year in top10
+import json
 from .models import Competition, Match, Club
-from .services import calcul_classement, update_match, extract_match_ids_from_HTML # extract_match_ids_from_web
+from .services import *
+# compute_multiteam, calcul_classement, update_match, update_from_api, create_matches, extract_match_ids_from_HTML # extract_match_ids_from_web
 import io
+
+#    path('multiequipe/<str:compet>/', views.multiequipe, name='multi-team'),
+@login_required
+def multiequipe(request, pattern=''):
+    if not pattern: pattern = (request.POST or request.GET).get('pattern') or ''
+    if'_'in pattern: pattern = pattern.replace('_',' ')
+    return render(request, "tournoi/multi-team.html", {'pattern':pattern.upper(),
+        'players': compute_multiteam(pattern) if len(pattern)==8 or pattern and request.user.is_superuser
+        else ['<dt>Nom de compétition invalide !<dd>Le nom doit être de la forme "CFE 2026" ou similaire.']
+    })
+
+#    path('maj_member_count/', views.maj_member_count, name='maj_member_count'),
+@login_required
+def maj_member_count(request):
+    for club in Club.objects.all():
+        update_from_api(club, exclude='description') # we don't want the long description
+    return redirect('tournoi:clubs')
+
+#    path('maj_participation/', views.maj_participation, name='maj_participation'),
+@login_required
+def maj_participation(request):
+    """Ajoute un champ `participation` textuel qui donne le nombre de rencontres
+    dans lesquelles le club a participé, et le domaine d'années, par exemple:
+    "17 CFE, 1 CFT, 14 LFR, 2023–2026"."""
+    from collections import defaultdict
+    club = {}
+    for match in Match.objects.all():
+        comp = match.competition
+        for t in (match.team1_id, match.team2_id):
+            if not(d:=club.get(t)): d=club[t]=defaultdict(int,{'min_year':9999}) #'max_year':0,'CFE':0,'CFT':0,'LFR':0,
+            if d['min_year'] > comp.year: d['min_year'] = comp.year
+            if d['max_year'] < comp.year: d['max_year'] = comp.year
+            d[comp.name[:3]] += 1
+    for c in Club.objects.all():
+        if d:=club.get(c.id):
+            if d['CVF']: d['CFT'] += d['CVF']
+            c.raw_data['participation']=", ".join(f"{d[t]} {t}"for t in('CFE','CFT','LFR'
+                ) if d[t]) + f", {d['min_year']}–{d['max_year']}" # &ndash; will be escaped in DTL
+            c.save(update_fields=['raw_data'])
+    return redirect('tournoi:clubs')
+
+
+@login_required
+#    path('timeout/<str:pattern>/', views.timeout, name='timeout'),
+def timeout(request, pattern:str):
+    """Affiche un tableau avec les match perdues par timeout, pour un joueur donné.
+    players = dict {player_id : [lost on time, total, percentage, [clubs]]} """
+    pattern = pattern.replace("_"," ")
+    timeouts = compute_timeouts(pattern) # from services
+    players={}
+    for t in timeouts: # t = (match, {club_id:players})
+        for c,pp in t[-1].items():
+            for p in pp: players[p]=players.get(p,0)+1
+    # to get total, we need to consider all matches
+    for match in Match.objects.filter(competition__name__icontains=pattern):
+        for team in (match.raw_data or {}).get('teams', {}).values():
+            club_id = team['@id'].split('/')[-1]
+            for p in team['players']:
+                if data := players.get(p['username']):
+                    if isinstance(data, int): data = players[p['username']] = [data, 0, []]
+                    data[1] += 1
+                    if club_id not in data[-1]: data[-1].append(club_id)
+    players = { p:[s[0],s[1],100*s[0]/s[1],s[-1]] for p,s in sorted(
+        players.items(), key= lambda t: (-t[1][0], t[1][1] ) )[:10] }
+    return render(request, "tournoi/timeout.html", {'timeouts':timeouts, 'players':players, 'pattern': pattern})
+
+### API FOR SCRAPING C.C FORUM/ANNOUNCEMENT PAGES ###
+SECRET_TOKEN = "my-super-secret-token-88372"
+# helper
+def french_to_aware_dt(french_date: str):
+    try:
+        # 1. Parse DD/MM/YYYY into a naive Python datetime (defaults to 00:00:00 time)
+        if french_date:
+            naive_dt = datetime.strptime(french_date, "%d/%m/%Y").replace(hour=12)
+        # 2. Convert to a timezone-aware datetime (prevents Django RuntimeWarnings)
+            return timezone.make_aware(naive_dt)
+    except ValueError:
+        # Fallback if the regex captured an invalid date like 32/13/2026
+        pass
+
+def cc_response(data=None, status=404, **kwargs):
+    if isinstance(data, str): data = {
+        'success': True, 'message': data } if status<300 else {'error': data}
+    response = JsonResponse(data, status=status, **kwargs)
+    response["Access-Control-Allow-Origin"] = "https://www.chess.com"
+    return response
+
+
+@csrf_exempt
+def bookmarklet_receiver(request):
+    # 1. Handle the CORS Preflight request
+
+    # Browsers send an 'OPTIONS' request first to check permissions
+    if request.method == "OPTIONS":
+        response = JsonResponse({})
+        response["Access-Control-Allow-Origin"] = "https://www.chess.com"
+        response["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        response["Access-Control-Allow-Headers"] = "Content-Type"
+        return response
+
+    # 2. Handle the actual data POST
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+
+            token = data.get("token")
+            # Security check
+            if token != SECRET_TOKEN: return cc_response("Invalid token", status=403)
+
+            # do the scraping in the JS, so let's expect a list of links
+            if not(match_ids := data.get("match_ids")):
+                return cc_response("No match id's found in HTML", status=404)
+
+            url = data.get("url") # this is to identify the competition
+
+            # Find the stub by the URL the user is currently on
+            try:
+                competition = Competition.objects.get(url=url)
+            except Competition.DoesNotExist:
+                return cc_response(f"No stub found for {url = !r}")#, status=404)
+
+            update_fields = {'raw_data'} # currently we return before save() if no new "raw_data"
+
+            if (start_date := french_to_aware_dt(data.get("start_date"))):  # e.g. "05/10/2026" for oct.2026
+                    competition.start_date = start_date
+                    update_fields |= {'start_date'}
+
+            if (cutoff_date := french_to_aware_dt(data.get("cutoff_date"))):  # e.g. "05/10/2026" for oct.2026
+                    competition.cutoff_date = cutoff_date
+                    update_fields |= {'cutoff_date'}
+
+            if not (raw_data := competition.raw_data or {}): competition.raw_data = raw_data
+
+            if matches := raw_data.get('matches', []):
+                ### merge with possibly existing & check whether new matches were added!
+                if new_matches := [mid for mid in match_ids if mid not in matches]:
+                    matches += new_matches
+                else:
+                    return cc_response(f"No new match id's found for existing {competition.name = !r}!")# status=404
+            else:
+                new_matches = raw_data['matches'] = match_ids
+
+            # Save the extracted links into your JSONField
+            competition.save(update_fields=update_fields)
+
+            warnings = create_matches(new_matches, competition)
+            # Success response!
+            message = f"Updated {competition.name} with {len(new_matches)} new matches!"
+            if warnings: message += "\n⚠️ ATTENTION:\n" + "\n".join(warnings)
+            return cc_response(message, 201)
+
+        except json.JSONDecodeError:
+            return cc_response("Invalid JSON format", status=400)
+        except Exception as e:
+            # Any unhandled crash gets caught here and sent safely back to JS
+            return cc_response(f"Server error: {str(e)}", status=500)
+
+    return JsonResponse({"error": "Method not allowed"}, status=405)
+
+
+#    path('create_match_data/', views.create_match_data, name='create_match_data'),
+def create_match_data(request):
+    # Récupère les compétitions "à créer" ou qui n'ont pas encore leurs matchs programmés
+    competitions = Competition.objects.filter(status='to_create') # TODO : Ajuster ce filtre
+    matches = []
+    for comp in competitions:
+        # Extraire les infos nécessaires depuis raw_data ou les champs du modèle
+        matches.append({
+            "titre": (name := comp.raw_data.get('title')),
+            "description": comp.raw_data.get('description'),
+            "club_hote_id": str(comp.raw_data.get('club_hote_id')),
+            "club_invite_name": comp.raw_data.get('club_invite_name'),
+            "date": comp.raw_data.get('date', '05/10/2026'),
+            "days_per_move": str(comp.raw_data.get('days_per_move', '3')),
+            "min_players": str(comp.raw_data.get('min_players', '3')),
+            "max_players": str(comp.raw_data.get('max_players', '')),
+            "min_rating": str(comp.raw_data.get('min_rating', '')),
+            "max_rating": str(comp.raw_data.get('max_rating',
+                '1400'if'1400'in name else'1000'if'1000'in name else'')),
+            "games_per_player": "2",
+            "min_games": "5" # nombre de parties un joueur doit déjà avoir jouées
+        })
+    response = JsonResponse(matchs, safe=False)
+    # Important : Autoriser la lecture cross-origin depuis Chess.com
+    response["Access-Control-Allow-Origin"] = "*"
+    return response
 
 #    path('classement/<str:compet>/', views.classement, name='classement'),
 def classement(request, compet: str):
@@ -18,20 +212,18 @@ def classement(request, compet: str):
     if "_" in compet: compet = compet.replace("_", " ")
     if competition := get_object_or_404(Competition, name=compet):
         classements = calcul_classement(competition) # from tournoi.services
-    context = {
-        'compet': competition or compet,
-        'classements': classements,
-    }
-    return render(request, 'tournoi/classement.html', context)
+
+    return render(request, 'tournoi/classement.html', context = {
+        'compet': competition or compet, 'classements': classements })
 
 # path('clubs/', views.clubs, name='clubs'),
 def clubs(request):
     clubs = Club.objects.order_by('name')
     return render(request, 'tournoi/clubs.html', {'clubs': clubs})
 
-# path('maj_club_abbrevs/', views.maj_club_abbrevs, name='maj_club_abbrevs'),
+# path('maj_divers/', views.maj_divers, name='maj_divers'),
 @staff_member_required
-def maj_club_abbrevs(request):
+def maj_divers(request):
     from tournoi.utils import update_club_abbrevs
     output=["<h2>Mise à jour des abbreviations de clubs...</h2>"]
     buffer = io.StringIO() ; pre = 0
@@ -107,8 +299,9 @@ def rename_club(request):
         'old_name': old_name, 'new_name': new_name,
     })
 
+# OBSOLETE ?!
 #path('update-match-names/', views.update_match_names, name='update_match_names'),
-@staff_member_required
+@login_required
 def update_match_names(request):
     if request.method == 'POST':
         # Find matches where name is either NULL or an empty string
@@ -141,6 +334,7 @@ def competition_detail(request, compet):
     return render(request, 'tournoi/comp_detail.html', {'comp': comp, 'matches': matches,
         'matches_to_update':matches_to_update})
 
+
 # The URL that triggers the extraction script
 # path('competition/<str:compet>/extract/', views.extract_matches, name='comp-extract'),
 @staff_member_required
@@ -148,6 +342,7 @@ def extract_matches(request, compet):
     # Security check: Only allow POST requests (button clicks)
     if request.method == "POST":
         comp = get_object_or_404(Competition, name=compet)
+
         # currently , trying to access www.chess.com crashes the script (not authorized by PythonAnywhere)
         # so we can't use:
         # if match_ids := extract_match_ids_from_web(comp.url): # defined in services.py
@@ -179,16 +374,8 @@ def extract_matches(request, compet):
                     messages.info(request, f"Pas de date de cut-off détectée.")
             messages.success(request, f"{len(match_ids)} rencontres détectées.")
             # Save to database
-            for m_id in match_ids:
-                # get_or_create prevents duplicates if the button is clicked twice
-                # BUT we can get an exception if the same match is linked to a different competition!
-                try: Match.objects.get_or_create( id=m_id, competition=comp,
-                        defaults={'name': '', 'status': ''} #or: status=='unknown' ?
-                    )
-                except: m_id = '0'+m_id ; Match.objects.get_or_create(id=m_id, competition=comp,
-                        defaults={'name': '', 'status': ''} #or: status=='' ?
-                    ) ;  messages.warning(request, f"ATTENTION: Match '{m_id}' en double - informez un admin!")
-
+            if warnings := create_matches(match_ids, comp):
+                messages.warning(request, "ATTENTION:" + "\n".join(warnings))
           else:
             messages.error(request, f"Impossible d'extraire la liste des rencontres.")# de l'URL {comp.url}
             match_ids=()
@@ -197,7 +384,8 @@ def extract_matches(request, compet):
         # Redirect back to the detail page so the user sees the new data
         return redirect('tournoi:comp-detail', compet=comp.name)
 
-#ngle-match update view.
+# OBSOLETE ?!
+#single-match update view.
 #This view takes one match ID, hits the CC API, updates the database, and returns JSON.
 #path('competition/<str:compet>/update/<str:match_id>/', views.update_single_match, name='match-update'),
 @staff_member_required
@@ -242,15 +430,25 @@ def homepage(request, pattern=''):
             messages.success(request, f"OK - compétition '{choix}' choisie!")
 
         # 3. Supprimer une compétition
-        elif 'del_compet' in request.POST:
-            del_target = request.POST.get('del_compet')
-            if c := Competition.objects.filter(name=del_target).update(hidden=True): # was:delete()
-                # now, c = number of affected records
-                # or:  ...first() : c.hidden = True; c.save()
-                if request.session.get('compet') == del_target:
-                    request.session.pop('compet', None)
-                messages.success(request, f"OK - compétition '{del_target}' cachée!")
+        elif del_target := request.POST.get('del_compet'):
+            if c := Competition.objects.filter(name=del_target).first():
+                c.hidden = not c.hidden
+                c.save(update_fields=['hidden'])
+                messages.success(request, f"OK - compétition '{del_target}' modifiée en {c.hidden = }!")
             else: messages.error(request, f"Compétition '{del_target}' non trouvée!")
+
+        # 3. terminer une compétition
+        elif stop_compet := request.POST.get('stop_compet'):
+            if matches := Match.objects.filter(competition__name=stop_compet):
+                cnt = 0
+                for m in matches:
+                    if m.status != 'finished':
+                        m.status = 'finished'; cnt += 1 ; m.save(update_fields=['status'])
+                # now, cnt = number of affected records
+                messages.success(request, f"OK - {cnt} rencontrés mis en 'terminée'")
+                if c := Competition.objects.filter(name=stop_compet).update(status='finished'):
+                    messages.success(request, f"OK - compétition {stop_compet} marquée 'terminée'")
+            else: messages.error(request, f"Compétition '{stop_compet}' non trouvée!")
 
         # 4. Détails d'une compétition
         elif 'detail_compet' in request.POST:
@@ -262,31 +460,51 @@ def homepage(request, pattern=''):
                 messages.error(request, f"La compétition '{det_target}' n'est plus dans la base!")
 
         # 5. Calculer le tableau
-        elif 'tableau' in request.POST:
-            tableau_target = request.POST.get('tableau')
-            # make_table(tableau_target) ...
-            messages.success(request, f"Tableau calculé pour {tableau_target}")
+        #elif 'tableau' in request.POST: ...
 
         return redirect('tournoi:home'  # Redirect prevents double form submission on refresh!
             if not pattern else f"{reverse('tournoi:home')}{pattern}/")
     # GET Request: was a particular competition selected?
-    if pattern:
+    if pattern: # or not request.user.is_staff and (pattern:=str(date.today().year)):
         # allow "sluggish" competition names
-        if "-" in pattern: pattern.replace("-"," ")
+        for t in "-_":
+            if t in pattern: pattern=pattern.replace(t," ")
         competitions = Competition.objects.filter(name__istartswith=pattern)
         if not competitions: return render(request, 'tournoi/simple_output.html', {
             'title': f'Aucune compétition dont le nom correspond au {pattern = !r}!'})
-    else:
-        competitions = Competition.objects.all()
+    else: return render(request, 'tournoi/simple_output.html', {
+            'title': f'Bievenue dans la web app "Gestion CFE-CFT-LFR" &copy; 2025-2026 by MFH !',
+            'output': """<p>Veuillez utiliser les liens dans la "barre de navigation" en haut de la page
+            pour choisir la catégorie (CFE/LFR/CFT) des compétitions à afficher,
+            ou les autres fonctionnalitées proposées.</p>
+            Sinon, vous trouverez de plus amples informations concernant ces compétitions
+            sur les forums maintenus par les organisateurs sur chess.com."""})
     # Prepare data for rendering
     matches_to_update = selected_compet = None
     if selected_name := request.session.get('compet'):
         if selected_compet := competitions.filter(name=selected_name).first():
-            if request.user.is_superuser:
+            if request.user.is_staff:
                 matches_to_update = list(selected_compet.matches.exclude(
                     status='finished').values_list('id', flat=True))
+    header = {'title':"Gestion CFE-CFT-LFR"}
+    if pattern := pattern.upper():
+        match pattern:
+            case "CFE": cat="Championnat de France par Equipe"
+            case "LFR": cat="Ligue Française des Régions"
+            case "CFT":
+                cat="Coupe de France des Territoires"
+                header['subtitle'] = """Remarque:
+La première édition de la CFT, en 2023, s'appelait la <a href="/CVF">CVF : Coupe des Villes de France</a>."""
+            case "CVF":
+                cat="Coupe des Villes de France"
+                header['subtitle'] = """Remarque:
+Cette compétition n'a existé qu'en 2023, c'est ensuite devenu la <a href="/CFT">CFT : Coupe de France des Territoires</a>."""
+            case _: cat = None
+        if cat: header['title'] += f" (Catégorie {pattern} : {cat})"
+    #elif request.user.is_staff:
+    #    #header['subtitle'] =
     context = {
-        'competitions': competitions, 'pattern': vars().get('pattern'),
+        'competitions': competitions, 'pattern': vars().get('pattern'), 'header':header,
         'selected_compet': selected_compet, 'matches_to_update':matches_to_update
     }
     return render(request, 'tournoi/cfe.html', context)

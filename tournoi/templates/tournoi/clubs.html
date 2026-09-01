@@ -3,61 +3,54 @@
 {% block title %}Clubs | Gestion CFE-CFT-LFR - (c) 2025 - 2026 by MFH{% endblock %}
 {% block content %}
 <style>
-    dt { font-weight: bold; } td {text-align:center;}
-    .selected { font-weight: bold; background: lime; border: 1px solid #00FF00; padding-left: 1em; padding-right: 1em;}
-    .hidden { font-style: italic; background: gray; border: 1px solid #666; padding-left: 1em; padding-right: 1em;}
-}
+    dt { font-weight: bold; } td {text-align:center; padding:3pt;}
 </style>
 <h1>Les clubs participant aux compétitions CFE - CFT - LFR</h1>
-<form method="post">{% csrf_token %}  <!-- Mandatory security tag in Django POST forms -->
+<form method="post">{% csrf_token %}{#<!-- Mandatory security tag in Django POST forms -->#}
 <table border=1 cellspacing=0><thead>
-    <tr><th>id</th><th>Nom court</th><th>Nom long</th><th>Abbréviation</th><th>Membres</th></tr>
+    <tr><th>Nom court</th><th>Nom officiel</th><th>Abbréviation</th><th><a {% if user.is_staff %}href="/maj_member_count/"
+    title"mettre à jour"{% endif %}>Membres</a></th>{% if user.is_staff %}<th><a {% if user.is_superuser %}href="/maj_participation/"
+    title"mettre à jour"{% endif %}>Rencontres disputées</th>{% endif %}</tr>
 </thead>
 <tbody>{% for club in clubs %}
-<tr><td><a {% if user.is_staff %}href="{{club.api}}"{% endif %}>{{club.id}}</a></td>
-    <td><a href="{{club.url}}" {% if user.is_staff %}
-    id="new_name" contenteditable onchange="rename(this);" data-oldname="{{club.name}}"
-    {% endif %}>{{club.name}}</span></td>
-    <td><a href="{{club.url}}">{{club.raw_data.name|default:"?"}}</a></td>
-    <td>{{club.abbreviation}}</td>
-    <td>{{club.raw_data.members_count|default:"?"}}</td>
+<tr><td><a title="{% if user.is_staff %}edit in Django admin"
+    href="/admin/tournoi/club/{{club.id}}{% else %}voir sur chess.com"
+    href="{{club.url}}{% endif %}">{{club.name}}</a></td>
+    <td><a href="{{club.url}}" title="voir sur chess.com">{{club.raw_data.name|default:"?"}}</a></td>
+    <td><a title="{% if user.is_staff %}API data for {{club.id}}"
+    href="{{club.api}}{% else %}utilisé dans colonnes du tableau classement{% endif %}">{{club.abbreviation}}</a></td>
+    <td>{{club.raw_data.members_count|default:"?"}}</td>{% if user.is_staff %}
+    <td>{{club.raw_data.participation|default:"?"}}</td>{% endif %}
 </tr>
-{% endfor %}{# club in clubs {% if user.is_staff %} #}
+{% endfor %}{# club in clubs #}
 </tbody>
 </table>
-</form>{# ... #}
-{% if user.is_staff %}
-<script>
-function rename(el){
-    const params = new URLSearchParams({
-        old_name: el.dataset.oldname,
-        new_name: el.innerText
-    }); window.location = "{% url 'tournoi:rename_club' %}?" + params.toString();}
-</script>
-<dl>
-<dt> Clubs:
-<dd>
-<pre>
-(2) - Visualiser et/ou actualiser la liste des clubs participants
-(5) - Afficher la liste des joueurs pour un club donné.
-(6) - Afficher la liste des rencontres pour chaque joueur d'un club donné.
-(9) - Liste des rencontres perdues au temps pour chaque joueur d'un club donné.
-(-) -
-<form action="{% url 'tournoi:rename_club' %}" method="get" class="form-inline">
-{#<!-- la page rename_club va demander confirmation -->#}
-    <button type="submit" class="btn btn-warning">Renommer</button>
-    <input name="new_name" required/>
-    <input name="old_name" value="{{club.name}}" required>
 </form>
+{% if user.is_staff %} <center>[ceci et la suite n'est visible que pour des admin authentifiés]</center>
+<dl>
+    <dt> Clubs:
+<dd>{#<!-- Homepage Form (Submits via GET to preview/confirm first) -->#}
+    <form action="{% url 'tournoi:rename_club' %}" method="get" class="form-inline">
+{#<!-- la page rename_club va demander confirmation -->#}
+    <button type="submit" class="btn btn-warning">Renommer le club</button>
+    <input type="text" name="old_name" placeholder="Nom actuel du club" required> en
+    <input type="text" name="new_name" placeholder="Nouveau nom" required>
+</form>
+  <br/> Ce formulaire n'est plus très utile : en tant qu'admin,
+  cliquez sur le nom du club ci-dessus et modifiez dans la console admin Django.
+<pre>
+TO DO:
+(5) - Afficher la liste des joueurs pour un club donné. [c-à-d. ceux qui participent à ces compèt -- calcul risque être long]
+(6) - Afficher la liste des rencontres pour chaque joueur d'un club donné. [comme ci-dessus]
+(9) - Liste des rencontres perdues au temps pour chaque joueur d'un club donné. [comme ci-dessus: restreint à "nos" compet !]
 </pre>
-</dd>
 
 <dt> Joueurs:
 <dd>
 <pre>
-(3) - Afficher les joueurs multi-équipes
+(3) - Afficher les joueurs multi-équipes *** TO DO !
 (4) - Afficher la liste des rencontres en cours et à venir pour un joueur donné.
-(8) - Afficher la liste des rencontres perdues au temps pour un joueur donné.
+(8) - Afficher la liste des rencontres perdues au temps pour un joueur donné. *** TO DO !
 </pre>
 </dl>
 {% endif %}{# user.is_staff #}

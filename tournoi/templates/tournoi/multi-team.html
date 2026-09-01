@@ -1,0 +1,25 @@
+{#<!-- tournoi/templates/tournoi/multi-team.html : context = `players`, `pattern` -->#}
+{% extends 'base.html' %}
+{% block title %}{{pattern}}: joueurs multi-équipe{% endblock %}
+{% block content %}
+<style>dt {text-weight:bold}
+dd {
+    padding-left: 2em;   /* global indentation */
+    text-indent: -2em;   /* first line pulled back */
+}</style>
+<h1>Joueurs "multi-équipe"{% if pattern %} en {{pattern}}</h1>
+Liste des joueurs qui participent au titre de plus qu'un club dans les compétitions "{{pattern}}"&nbsp;:
+<dl>
+{% if players %}
+    {% for player in players %}{{ player|safe }}{% endfor %}
+{% else %}
+<dt>Aucun joueur multi-équipe dans ces compétitions !
+{% endif %}
+</dl>
+{%endif%}{#no pattern#}
+</h1>
+<br/>
+<form method=POST>{%csrf_token%}
+    Pour obtenir la liste des "joueurs multi-équipe" d'une compétition, donner son nom (de la forme "CFE 2026" ou similaire): <input name=pattern />
+</form>
+{% endblock content %}

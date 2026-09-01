@@ -1,0 +1,27 @@
+{#<!-- tournoi/templates/tournoi/timeout.html : context = `pattern`, `timeouts`, `players` -->#}
+{% extends 'base.html' %}
+{% block content %}
+<style>td {text-align:center}</style>
+{% if players %}
+<h1>Joueurs ayant perdus le plus de parties au temps</h1>
+<table><thead><tr><th>Joueur<th>Parties perdues au temps<th>Club(s)</tr></thead>
+{% for player,stats in players.items %}
+<tr><td><a href="https://www.chess.com/member/{{player}}">{{player}}</a></td>
+<td>{{stats.0|default:"?"}} / {{stats.1|default:"?"}} : {{stats.2|floatformat:1}}% </td>
+<td>{% for club_id in stats.3 %}<a href="https://www.chess.com/club/{{club_id}}"
+>{{club_id}}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+</tr>{% endfor %}{# p,stats in players.items #}
+</table>
+{% endif %}
+{% if timeouts %}
+<h1>Liste des parties perdues au temps:</h1>
+<table><thead><tr><th>Rencontre<th>Club<th>Joueurs</tr></thead>
+{% for match,t in timeouts %}{% for club_id,players in t.items %}
+<tr><td><a href="{{match.url}}">{{match.name}}</a></td>
+<td><a href="https://www.chess.com/club/{{club_id}}">{{club_id}}</a></td>
+<td>{% for player in players %}<a href="https://www.chess.com/member/{{player}}"
+>{{player}}</a>{% if not forloop.last %}, {% endif %}{% endfor %}</td>
+</tr>{% endfor %}{# t.items #}{% endfor %}{# timeouts #}
+</table>
+{% endif %}
+{% endblock content %}

@@ -29,9 +29,26 @@ class Competition(models.Model):
     raw_data = models.JSONField(default=dict, blank=True)
     sort_order = models.IntegerField(default=0)
     year = models.IntegerField(default=0)
+    # status == 'undefined' means it doesn't yet have matches
+    status = models.CharField(max_length=50, blank=True, default='')
     class Meta:
         ordering = ['-year', '-sort_order', 'name']
 
+    def save(self, *args, **kwargs):
+        #if not self.slug:
+        #   self.slug = slugify(self.titre)
+        # 0123456789
+        # CFE 2027 x
+        # CFE2026 x
+        if not self.year and (year := self.name[3:8].strip()).isdecimal():
+           self.year = int(year)
+           if (uf := kwargs.get('update_fields')) is not None:
+               kwargs['update_fields'] = set(uf) | {'year'}
+        if not self.status:
+            self.status='undefined' if not (self.raw_data or {}).get('matches') else 'ok'
+            if (uf := kwargs.get('update_fields')) is not None:
+               kwargs['update_fields'] = set(uf) | {'status'}
+        super().save(*args, **kwargs)
 
 # 1. The Abstract Base Class for Club & Match (not Competition)
 class BaseModel(models.Model):
@@ -40,7 +57,7 @@ class BaseModel(models.Model):
     to all models that inherit from it. No database table is created for this class.
     """
     id = models.CharField(max_length=100, primary_key=True)
-    name = models.CharField(max_length=200)
+    name = models.CharField(max_length=200, blank=True, default='')
     class Meta:
         abstract = True
 
@@ -49,11 +66,14 @@ class BaseModel(models.Model):
 
     @property # so we can use `club.api` in Python
     def api(self): return self.api_prefix + self.id
-    @property # so we can use `club.web_url` in Python or `{{ club.web_url }}` in HTML!
+    @property # so we can use `club.url` in Python or `{{ club.url }}` in HTML!
     def url(self): return self.url_prefix + self.id
+    def linkedname(self, attr=''):
+        if not attr and hasattr(self,'attr'): attr = self.attr
+        return f'<a href="{self.url}" {attr}>{self.name}</a>'
 
     # we dump the whole API data dict here so we don't have to ping the API constantly
-    raw_data = models.JSONField(null=True, blank=True)
+    raw_data = models.JSONField(default=dict, blank=True)
 
 
 # Club must be defined before Match which refers to this
@@ -74,6 +94,16 @@ class Club(BaseModel):
     # 3-letter abbreviation for the "tableau de classement"
     abbreviation = models.CharField(max_length=3, blank=True, null=True)
 
+    def save(self, *args, **kwargs):
+        if not self.abbreviation and (name := self.name):
+           name = name.upper()
+           if name.startswith("TEAM"): name = name[4:].trim(" -")
+           self.abbreviation = name[:3]
+           if (uf := kwargs.get('update_fields')) is not None:
+               kwargs['update_fields'] = set(uf) | {'abbreviation'}
+        super().save(*args, **kwargs)
+# end class Club
+
 
 class Match(BaseModel):
     api_prefix = "https://api.chess.com/pub/match/"
@@ -93,7 +123,7 @@ class Match(BaseModel):
     # and then we set the "scores" below to their "final" value (as of cutoff date)
     # which MUST NOT be updated later,
     # even if the raw_api_data might get updated until all games are finished.
-    status = models.CharField(max_length=50)
+    status = models.CharField(max_length=50, blank=True)
 
     # Connect matches to our clubs
     # Then we can use `home_matches = my_club.matches_as_team1.all()`
@@ -117,3 +147,11 @@ class Match(BaseModel):
         """
         return 0 if self.status=='finished' else 2*self.num_boards - round(
                                 self.score_team1 + self.score_team2)
+
+    def save(self, *args, **kwargs):
+        if not self.name and (name := (self.raw_data or {}).get('name')):
+           self.name = name
+           if (uf := kwargs.get('update_fields')) is not None:
+              kwargs['update_fields'] = set(uf) | {'name'}
+        super().save(*args, **kwargs)
+# end class Match

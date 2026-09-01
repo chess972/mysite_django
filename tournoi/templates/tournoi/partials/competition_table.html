@@ -1,4 +1,5 @@
-  <h2>Compétition <a href="{{ comp.url }}" target="_blank">{{ comp.name }}</h2>
+{#<!-- receives `comp`, `matches`, `matches_to_update` -->#}
+<h2>Compétition <a href="{{ comp.url }}" target="_blank">{{ comp.name }}</h2>
   <p>(définie sur la page <a href="{{ comp.url }}" target="_blank">{{ comp.url }}</a>)</p>
   {% if not matches %}<!-- Display Level 1 button if no matches exist -->
 {% if user.is_staff %}
@@ -6,13 +7,15 @@
       {% csrf_token %} <!-- Mandatory Django security token -->
       <button type="submit">Extraire les rencontres du code HTML ci-après:</button>
 <div id="rich-paste-box" contenteditable="true"
-     style="border: 2px dashed #ccc; padding: 15px; min-height: 100px; background: #fff; margin-bottom: 10px;">
-      <b style="color:red">copier-coller ici</b> la partie pertinente de la page,
-      avec les liens "Résultat" (vers les rencontres) et éventuelle mention de cut-off.<br/>
-      [NB: pas besoin de copier-coller le code source,
-      copiez directement le "rich text" de la page web.]
-     </div>
-     <input type="hidden" name="pasted_html">
+    style="border: 2px dashed #ccc; padding: 15px; min-height: 100px; background: #fff; margin-bottom: 10px;">
+    <b style="color:red">copier-coller ici</b> la partie pertinente de la page,
+    avec les liens "Résultat" (vers les rencontres) et éventuelle mention de cut-off.<br/>
+    [NB: pas besoin de copier-coller le code source, copiez directement le "rich text" de la page web.]
+    </div>
+<input type="hidden" name="pasted_html">
+ou mieux : avec <a href="/static/bookmarklet.js">ce bookmarklet</a> dans vos favoris, allez
+<a href="{{ comp.url }}" target="_blank">sur la page {{ comp.url }}</a>, cliquez sur le favori,
+ puis revenez (<a href="/competition/{{comp.name}}}">sur cette page "détails & mise à jour</a> pour actualiser les rencontres.
     </form>
 <script>
 function prepareSubmit(formElement) {
@@ -32,7 +35,7 @@ function prepareSubmit(formElement) {
     <br/><b>N.B.: </b> Certaines rencontres nécessitent une mise à jour par un administrateur.
     {% endif %}{# matches_to_update #}
 
-<style>td {text-align:center}</style>
+<style>td {text-align:center; white-space: nowrap;}</style>
     <h3>Rencontres</h3>
     <table border="1">
       <tr>
@@ -101,9 +104,7 @@ async function startUpdateLoop() {
 }
 </script>
     {% endif %}{# matches_to_update #}
-    <form
-        action="{% url 'tournoi:update_match_names' %}" method="post" style="display: inline">
-    {% csrf_token %}<button type="submit" class="btn btn-outline-primary">
-    Mettre à jour les noms de match manquants</button></form>
+ {# <form action="{% url 'tournoi:update_match_names' %}" method="post" style="display: inline">{% csrf_token %}  #}
+ {# <button type="submit" class="btn btn-outline-primary">Mettre à jour les noms de match manquants</button></form> #}
   {% endif %}{# is_staff #}
 {% endif %}{# matches are known #}

@@ -2,6 +2,11 @@
 {% extends 'base.html' %}
 {% block content %}
 <h1>Classement pour <a href="{{compet.url}}">{{compet}}</a></h1>
+{%if compet.raw_data.description %}<p>{{ compet.raw_data.description|safe }}</p>{% endif %}
+<center style="margin-bottom:2ex"> &mdash; {% if compet.start_date %} Démarrage le {{compet.start_date}} &mdash; {% endif %}
+{% if compet.cutoff_date %} Cut-off le {{compet.cutoff_date}} &mdash; {% endif %}
+{% if user.is_staff %} <a href="/admin/tournoi/competition/{{compet.id}}">éditer dans la console admin</a> &mdash; {% endif %}
+</center>
 {% for classement in classements %}{{classement|safe}}
 {% endfor %}
 {% endblock content %}
