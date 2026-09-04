@@ -54,11 +54,9 @@ for ma in mm:
      if not ma.raw_data: ma.raw_data={}
      print(update_match(ma))            # ==> True : now OK !
 
-
 '''
 from tournoi.models import Competition,Club,Match
 from django.db.models import F,Q # for top10
-from tournoi.services import update_from_api
 
 ###### CLUBS #######
 
@@ -107,7 +105,7 @@ def update_club_abbrevs():
         if not club.name:
             if not club.raw_data:
                 print(end="Fetching data for {match.id = } from API...")
-                if update_from_api(club) is not True: continue
+                if club.update_from_api() is not True: continue
             if not(name := club.raw_data.get('name')): continue
             while name: club.name = name; name=(
                         club.name[5:] if club.name.lower().startswith("team")
@@ -129,7 +127,7 @@ def update_club_ids():
     for club in Club.objects.filter(raw_data__club_id__isnull=True):
         if not club.raw_data:
             print(end = f"Fetching data for {club.id = } from API...")
-            if update_from_api(club) is not True:  # no update available
+            if club.update_from_api() is not True:  # no update available
                 ...
         club.save(update_fields=['name'])
         print(f"updated club {club.id}'s name to {club.name}")

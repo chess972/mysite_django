@@ -3,12 +3,19 @@ from .models import Competition,Match,Club  # Import your models here if the scr
 import re, requests
 from django.db import IntegrityError
 
-aliases = { # URLs: https://www.chess.com/club/xxx
+# Le dict souvent donne le nouveau nom pour l'ancien nom, quand un club a été renommé
+# ou entièrement remplacé par un autre [et désactivé].
+# En gros, seulement si https://www.chess.com/club/ANCIEN ne fonctionne plus
+# (même si parfois, https://api.chess.com/pub/club/ANCIEN fonctionne encore.)
+aliases = { # voir aussi: https://docs.google.com/document/d/1ZrB3Wt947U2VhRUhonE2_Wv0irX-McWScKqV5XVVAK4/
+    # keys = clubs qui N'EXISTENT PLUS (URL https://www.chess.com/club/xxx => 404)
     'normandie': # "Ce club a été désactivé." (en avril 2025 ?)
         'echiquier-de-normandie', # créé 15.4.2025
     'paris-neuf-trois': 'saint-denis-93-chess',	    # créé 1.6.2024, renommé en juin 2026
-    'team-grand-est-1': # a participé en CFE 2022
+    'team-grand-est-1': # n'existe plus. a participé en CFE 2022 ; en ..., Grand Est = ''
         'region-grand-est',
+    'region-mayotte': # n'existe plus (ni www, ni api)
+        'team-mayotte-mahorais-chess-club', # créé Apr 6, 2024
     #'isula-corsica':   # créé 16.5.2021, "Destiné à participer...dans les futures éditions...CFE"
     #   'corsica-chess-team-squadra-corsa-di-scacchi',  # créé 10.7.2026 . Les deux sont actifs
     #"team-orleans":    # créé 23.11.2022
@@ -95,8 +102,8 @@ def create_matches(match_ids: list[str], competition: str|Competition) -> list[s
             );  warnings.append(f"Match '{m_id}' en double - informez un admin!")
     return warnings
 
-def update_from_api(item, exclude='description'):
-    """Works for item (Club | Match), update the raw_data field from the api.chess.com, if necessary.
+def update_from_api(item: Club | Match, exclude='description'):
+    """Update the raw_data field from api.chess.com, if necessary.
     Returns True if updated, False if not, str or exception on failure.
     `exclude` will remove the given key(s) from API data."""
     if isinstance(exclude, str) or exclude and not hasattr(exclude, '__iter__'): exclude = exclude,

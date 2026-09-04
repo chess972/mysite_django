@@ -1,5 +1,10 @@
 # tournoi/views.py - (c) 2026 by MFH
 
+from contextlib import redirect_stdout
+from datetime import date,datetime # for current_year in top10
+import io
+import json
+
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
@@ -12,37 +17,50 @@ from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
-from contextlib import redirect_stdout
-from datetime import date,datetime # for current_year in top10
-import json
 from .models import Competition, Match, Club
-from .services import *
-# compute_multiteam, calcul_classement, update_match, update_from_api, create_matches, extract_match_ids_from_HTML # extract_match_ids_from_web
-import io
+from . import services
+# get_next_match, compute_multiteam, calcul_classement, update_match, create_matches, extract_match_ids_from_HTML
+
+# path('api/next-match/', views.api_next_match, name='api_next_match'),
+def api_next_match(request, pattern=''):
+    """Return Json with data for filling in the form at chess.com, to create the next competition."""
+    if"_"in pattern: pattern = pattern.replace("_"," ")
+    for comp in Competition.objects.filter(status__startswith="incomplet", name__icontains=pattern):
+        if response := services.get_next_match(comp): # from services
+            return response
+    return JsonResponse({ 'status': 'error', 'message':
+        f"Aucun match à programmer trouvé pour {pattern = !r}" if pattern
+        else "Aucun match à programmer trouvé !"
+        }, status=404)
+
 
 #    path('multiequipe/<str:compet>/', views.multiequipe, name='multi-team'),
 @login_required
 def multiequipe(request, pattern=''):
+    """Etablir la liste des "joueurs multi-équipe", qui jouent (ou se sont inscrits)
+    pour plus qu'un seul club au sein de la même compétition."""
     if not pattern: pattern = (request.POST or request.GET).get('pattern') or ''
     if'_'in pattern: pattern = pattern.replace('_',' ')
     return render(request, "tournoi/multi-team.html", {'pattern':pattern.upper(),
-        'players': compute_multiteam(pattern) if len(pattern)==8 or pattern and request.user.is_superuser
+        'players': services.compute_multiteam(pattern) if len(pattern)==8 or pattern and request.user.is_superuser
         else ['<dt>Nom de compétition invalide !<dd>Le nom doit être de la forme "CFE 2026" ou similaire.']
     })
 
 #    path('maj_member_count/', views.maj_member_count, name='maj_member_count'),
 @login_required
 def maj_member_count(request):
+    "Actualiser le nombre de membres [chess.com vs notre BDD] de tous les clubs."
     for club in Club.objects.all():
-        update_from_api(club, exclude='description') # we don't want the long description
+        club.update_from_api(exclude='description') # we don't want the long description
     return redirect('tournoi:clubs')
 
+# Sur la page /clubs, lien "Participation"
 #    path('maj_participation/', views.maj_participation, name='maj_participation'),
 @login_required
 def maj_participation(request):
-    """Ajoute un champ `participation` textuel qui donne le nombre de rencontres
-    dans lesquelles le club a participé, et le domaine d'années, par exemple:
-    "17 CFE, 1 CFT, 14 LFR, 2023–2026"."""
+    """Ajoute/actualise, dans chaque `Club.raw_data`, une entrée `participation`
+    qui donne le nombre de rencontres dans lesquelles le club a participé,
+    et le domaine d'années, par exemple: "17 CFE, 1 CFT, 14 LFR, 2023–2026"."""
     from collections import defaultdict
     club = {}
     for match in Match.objects.all():
@@ -67,7 +85,7 @@ def timeout(request, pattern:str):
     """Affiche un tableau avec les match perdues par timeout, pour un joueur donné.
     players = dict {player_id : [lost on time, total, percentage, [clubs]]} """
     pattern = pattern.replace("_"," ")
-    timeouts = compute_timeouts(pattern) # from services
+    timeouts = services.compute_timeouts(pattern) # from services
     players={}
     for t in timeouts: # t = (match, {club_id:players})
         for c,pp in t[-1].items():
@@ -85,9 +103,11 @@ def timeout(request, pattern:str):
         players.items(), key= lambda t: (-t[1][0], t[1][1] ) )[:10] }
     return render(request, "tournoi/timeout.html", {'timeouts':timeouts, 'players':players, 'pattern': pattern})
 
+
 ### API FOR SCRAPING C.C FORUM/ANNOUNCEMENT PAGES ###
 SECRET_TOKEN = "my-super-secret-token-88372"
-# helper
+
+# helper fct for bookmarklet_receiver
 def french_to_aware_dt(french_date: str):
     try:
         # 1. Parse DD/MM/YYYY into a naive Python datetime (defaults to 00:00:00 time)
@@ -99,6 +119,8 @@ def french_to_aware_dt(french_date: str):
         # Fallback if the regex captured an invalid date like 32/13/2026
         pass
 
+
+#helper fct for bookmarklet_receiver
 def cc_response(data=None, status=404, **kwargs):
     if isinstance(data, str): data = {
         'success': True, 'message': data } if status<300 else {'error': data}
@@ -110,7 +132,6 @@ def cc_response(data=None, status=404, **kwargs):
 @csrf_exempt
 def bookmarklet_receiver(request):
     # 1. Handle the CORS Preflight request
-
     # Browsers send an 'OPTIONS' request first to check permissions
     if request.method == "OPTIONS":
         response = JsonResponse({})
@@ -142,11 +163,15 @@ def bookmarklet_receiver(request):
 
             update_fields = {'raw_data'} # currently we return before save() if no new "raw_data"
 
-            if (start_date := french_to_aware_dt(data.get("start_date"))):  # e.g. "05/10/2026" for oct.2026
+            # in case start_date and/or cutoff_date are already defined, DON'T
+            # update these from the scraped data, which might be incorrect
+            if not competition.start_date and ( # if date exists, do nothing
+                start_date := french_to_aware_dt(data.get("start_date"))):  # e.g. "05/10/2026" for oct.2026
                     competition.start_date = start_date
                     update_fields |= {'start_date'}
 
-            if (cutoff_date := french_to_aware_dt(data.get("cutoff_date"))):  # e.g. "05/10/2026" for oct.2026
+            if not competition.cutoff_date and ( # if date exists, do nothing
+                cutoff_date := french_to_aware_dt(data.get("cutoff_date"))):  # e.g. "05/10/2026" for oct.2026
                     competition.cutoff_date = cutoff_date
                     update_fields |= {'cutoff_date'}
 
@@ -154,8 +179,8 @@ def bookmarklet_receiver(request):
 
             if matches := raw_data.get('matches', []):
                 ### merge with possibly existing & check whether new matches were added!
-                if new_matches := [mid for mid in match_ids if mid not in matches]:
-                    matches += new_matches
+                if new_matches := set( match_ids ).difference( matches ):
+                    matches . extend ( new_matches )
                 else:
                     return cc_response(f"No new match id's found for existing {competition.name = !r}!")# status=404
             else:
@@ -164,10 +189,12 @@ def bookmarklet_receiver(request):
             # Save the extracted links into your JSONField
             competition.save(update_fields=update_fields)
 
-            warnings = create_matches(new_matches, competition)
-            # Success response!
-            message = f"Updated {competition.name} with {len(new_matches)} new matches!"
-            if warnings: message += "\n⚠️ ATTENTION:\n" + "\n".join(warnings)
+            warnings = services.create_matches(new_matches, competition)
+            message = "Competition {competition} non trouvée!" if warning is False\
+                else f"Updated {competition.name} with {len(new_matches)} new matches!"
+
+            if warnings:
+                message += "\n⚠️ ATTENTION:\n" + "\n".join(warnings)
             return cc_response(message, 201)
 
         except json.JSONDecodeError:
@@ -177,7 +204,6 @@ def bookmarklet_receiver(request):
             return cc_response(f"Server error: {str(e)}", status=500)
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
-
 
 #    path('create_match_data/', views.create_match_data, name='create_match_data'),
 def create_match_data(request):
@@ -201,7 +227,7 @@ def create_match_data(request):
             "games_per_player": "2",
             "min_games": "5" # nombre de parties un joueur doit déjà avoir jouées
         })
-    response = JsonResponse(matchs, safe=False)
+    response = JsonResponse(matches, safe=False)
     # Important : Autoriser la lecture cross-origin depuis Chess.com
     response["Access-Control-Allow-Origin"] = "*"
     return response
@@ -211,8 +237,7 @@ def classement(request, compet: str):
     # This looks up the Competition where name matches the URL
     if "_" in compet: compet = compet.replace("_", " ")
     if competition := get_object_or_404(Competition, name=compet):
-        classements = calcul_classement(competition) # from tournoi.services
-
+        classements = services.classement.calcul_classement(competition) # from tournoi.services
     return render(request, 'tournoi/classement.html', context = {
         'compet': competition or compet, 'classements': classements })
 
@@ -349,7 +374,7 @@ def extract_matches(request, compet):
         # but instead we have to use:
         if pasted_html := request.POST.get('pasted_html', ''):
           #messages.info(request, f"{len(pasted_html) = }")
-          if match_ids := extract_match_ids_from_HTML(pasted_html): # defined in services.py
+          if match_ids := services.extract_match_ids_from_HTML(pasted_html): # defined in services.py
             raw_data = {} ; date = None
             if not isinstance( match_ids[0], str ): # cut-off date
                 cutoff_dates = match_ids.pop(0)
@@ -374,7 +399,7 @@ def extract_matches(request, compet):
                     messages.info(request, f"Pas de date de cut-off détectée.")
             messages.success(request, f"{len(match_ids)} rencontres détectées.")
             # Save to database
-            if warnings := create_matches(match_ids, comp):
+            if warnings := services.create_matches(match_ids, comp):
                 messages.warning(request, "ATTENTION:" + "\n".join(warnings))
           else:
             messages.error(request, f"Impossible d'extraire la liste des rencontres.")# de l'URL {comp.url}
@@ -398,7 +423,7 @@ def update_single_match(request, compet, match_id):
     # Only ping the API if the match isn't finished
     # (TODO: implement "expiry"/"last_updated" timestamp)
     if match.status != 'finished':
-        if error := update_match(match):
+        if error := services.update_match(match):
             messages.error(request, error)
             return JsonResponse({ 'status': 'error', 'message': error }, status=404)
     match_data={key: getattr(match, key) for key in (

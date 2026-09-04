@@ -1,6 +1,8 @@
 # tournoi/models.py - (c) 23-07-2026 by MFH
 from django.db import models
 from datetime import datetime
+import requests # for update_from_api()
+from tournoi.constants import headers
 
 class Competition(models.Model):
     # for competitions, the ID we use is the "(short) name"
@@ -39,7 +41,6 @@ class Competition(models.Model):
         #   self.slug = slugify(self.titre)
         # 0123456789
         # CFE 2027 x
-        # CFE2026 x
         if not self.year and (year := self.name[3:8].strip()).isdecimal():
            self.year = int(year)
            if (uf := kwargs.get('update_fields')) is not None:
@@ -75,6 +76,28 @@ class BaseModel(models.Model):
     # we dump the whole API data dict here so we don't have to ping the API constantly
     raw_data = models.JSONField(default=dict, blank=True)
 
+    def update_from_api(self, exclude="description"):
+        """Update the raw_data field from api.chess.com, if allowed (status != 'finished') and necessary.
+        Returns True if updated, False if not, str or exception on failure.
+        `exclude` will remove the given key(s) from API data.
+        """
+        # provide default bc Club' doesn't have 'status'`!
+        if getattr(self, 'status', 0) == 'finished': return # DON'T update !
+
+        if isinstance(exclude, str) or exclude and not hasattr(exclude, '__iter__'):
+            exclude = exclude, # make it an (iterable) tuple
+        try: # fetch data from api.chess.com
+            response = requests.get(self.api, headers=headers)
+            if response.status_code != 200: return "Failed to connect to API"
+            api_data = response.json()
+            for key in exclude or (): api_data.pop(key, None)
+            if not self.raw_data: self.raw_data = {} # should be superfluous
+            if not all(self.raw_data.get(k) == v for k,v in api_data.items()):
+                self.raw_data |= api_data # don't remove "custom" fields added by hand
+                self.save(update_fields=['raw_data'])
+                return True # OK: updated
+            return False # no update made
+        except Exception as e: return e # an error occurred
 
 # Club must be defined before Match which refers to this
 class Club(BaseModel):
@@ -95,11 +118,21 @@ class Club(BaseModel):
     abbreviation = models.CharField(max_length=3, blank=True, null=True)
 
     def save(self, *args, **kwargs):
+        if not self.name and (name := (self.raw_data or {}).get('name')):
+           self.name = name ; NAME = name.upper()
+           for prefix in ("TEAM", "EQUIPE", "ÉQUIPE"):
+               if NAME.startswith(prefix): name = name[len(prefix)+1:].trim(" -"); break
+           if NAME.endswith('CHECS'): name = name[:-6].trim(" -")    # Echecs, échecs...
+           if NAME.endswith('TROPOLE'): name = name[:-9].trim(" -")  # Métropole ...
+           if (uf := kwargs.get('update_fields'))is not None:   # if None, all is updated, we must not change that;
+              kwargs['update_fields'] = set(uf) | {'name'}      # but if [], nothing is updated
         if not self.abbreviation and (name := self.name):
-           name = name.upper()
-           if name.startswith("TEAM"): name = name[4:].trim(" -")
-           self.abbreviation = name[:3]
-           if (uf := kwargs.get('update_fields')) is not None:
+           # construct a default ABBREV from name
+           NAME = name.upper() # ABBREV is uppercase anyways, and this makes checks simpler below
+           for prefix in ("TEAM", "EQUIPE", "ÉQUIPE"):
+               if NAME.startswith(prefix): NAME = NAME[len(prefix)+1:].trim(" -"); break
+           self.abbreviation = NAME[:3]
+           if (uf := kwargs.get('update_fields'))is not None:
                kwargs['update_fields'] = set(uf) | {'abbreviation'}
         super().save(*args, **kwargs)
 # end class Club
@@ -151,7 +184,7 @@ class Match(BaseModel):
     def save(self, *args, **kwargs):
         if not self.name and (name := (self.raw_data or {}).get('name')):
            self.name = name
-           if (uf := kwargs.get('update_fields')) is not None:
+           if uf := kwargs.get('update_fields', ()):
               kwargs['update_fields'] = set(uf) | {'name'}
         super().save(*args, **kwargs)
 # end class Match
