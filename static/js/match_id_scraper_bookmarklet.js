@@ -1,6 +1,6 @@
-javascript:(function(){/*** DON'T USE // : this is pasted into bookmark-URL field! ***/
-
-/* 1. FIND THE CONTAINER USING THE FIRST MATCH LINK */
+javascript:(function(){/* DON'T USE "//" : this is pasted into bookmark-URL field!
+ * Bookmarklet for "scraping" match id's from club/forum announcements *
+ * 1. FIND THE CONTAINER USING THE FIRST MATCH LINK */
     let firstLink = document.querySelector('a[href*="chess.com/club/matches/"]');
     let opContainer = document;
     if (firstLink) {

@@ -28,7 +28,9 @@ from . import services
 def api_next_match(request, pattern=''):
     """Return Json with data for filling in the form at chess.com, to create the next competition."""
     if "_" in pattern: pattern = pattern.replace("_"," ")
+    count = 0
     for comp in Competition.objects.filter(status__startswith="incomplet", name__icontains=pattern):
+        count += 1
         if data := services.get_next_match(comp): # from services
             response = JsonResponse(data, safe=False)
             # Important : Autoriser la lecture cross-origin depuis Chess.com
@@ -36,7 +38,7 @@ def api_next_match(request, pattern=''):
             return response
     return JsonResponse({ 'status': 'error', 'message':
         f"Aucun match à programmer trouvé pour {pattern = !r}" if pattern
-        else "Aucun match à programmer trouvé !" }, status=404)
+        else f"Aucun match à programmer trouvé, dans {count} compèt 'incomplètes' !" }, status=404)
 
 
 #    path('multiequipe/<str:compet>/', views.multiequipe, name='multi-team'),

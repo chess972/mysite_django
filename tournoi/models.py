@@ -127,16 +127,16 @@ class Club(BaseModel):
         if not self.name and (name := (self.raw_data or {}).get('name')):
            self.name = name ; NAME = name.upper()
            for prefix in ("TEAM", "EQUIPE", "ÉQUIPE"):
-               if NAME.startswith(prefix): name = name[len(prefix)+1:].trim(" -"); break
-           if NAME.endswith('CHECS'): name = name[:-6].trim(" -")    # Echecs, échecs...
-           if NAME.endswith('TROPOLE'): name = name[:-9].trim(" -")  # Métropole ...
+               if NAME.startswith(prefix): name = name[len(prefix)+1:].strip(" -"); break
+           if NAME.endswith('CHECS'): name = name[:-6].strip(" -")    # Echecs, échecs...
+           if NAME.endswith('TROPOLE'): name = name[:-9].strip(" -")  # Métropole ...
            if (uf := kwargs.get('update_fields'))is not None:   # if None, all is updated, we must not change that;
               kwargs['update_fields'] = set(uf) | {'name'}      # but if [], nothing is updated
         if not self.abbreviation and (name := self.name):
            # construct a default ABBREV from name
            NAME = name.upper() # ABBREV is uppercase anyways, and this makes checks simpler below
            for prefix in ("TEAM", "EQUIPE", "ÉQUIPE"):
-               if NAME.startswith(prefix): NAME = NAME[len(prefix)+1:].trim(" -"); break
+               if NAME.startswith(prefix): NAME = NAME[len(prefix)+1:].strip(" -"); break
            self.abbreviation = NAME[:3]
            if (uf := kwargs.get('update_fields'))is not None:
                kwargs['update_fields'] = set(uf) | {'abbreviation'}
