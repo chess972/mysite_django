@@ -16,6 +16,56 @@ from .classement import calcul_classement, Classement #, TD
 from .extract import create_matches, extract_match_ids_from_HTML
 
 
+# called from views.api_next_match
+def get_next_match(comp: Competition):
+    """Renvoit la Json Response avec les données nécessaires pour remplir le
+    formulaire de création de match sur chess.com, pour le prochain match à
+    créer dans la ou les `compet`."""
+    try:
+        create = comp.raw_data['create'] # must be present
+        if not (rounds := create.get('rounds')):
+            rounds = [create]
+        # to get a parameter, first check in `ronde`, then in `create`
+        get = lambda key, default='': ronde.get(key, create.get(key, default) if create != ronde else default)
+        for ronde in rounds:
+            # For 'pairings', no need to check both, because if 'create' has 'pairings',
+            # it can't have rounds, so `ronde` = `create`.
+            if not (pairings := ronde.get('pairings')):
+                # créer les appariements pour une poule. round['teams'] doit être défini
+                import itertools
+                pairings = itertools.combinations(round['teams'], 2)
+            for pair in pairings:
+                clubs = Club.objects.in_bulk(pair)
+                team1, team2 = (clubs.get(team) for team in pair)
+                title = get('title', comp.name)
+                if " vs " not in title:
+                    title = title.trim(" :") + " : {team1} vs {team2}"
+                title = title.format(team1=team1, team2=team2)
+                if Match.objects.filter(name=title): continue # this match was already created
+                data = {
+    "titre":        title, # str(.)
+    "description":  get('description', "Rencontre de la compétition "+comp.name), #TODO : add "cut-off ..."
+    "club_hote_id":     team1.club_id,
+    "club_invite_name": team2.raw_data.get('name', team2.name),
+    "date":             get('start_date', comp.start_date), # format: DD/MM/YYYY
+    "days_per_move":    get('days_per_move', "3"),
+    "min_players":      get('min_players', "3"),
+    "max_players":      get('max_players', ''),
+    "min_rating":       get('min_rating', ''),
+    "max_rating":       get('max_rating', '1400'if'1400'in title else'1000'if'1000'in title else''),
+    "games_per_player": "2",
+    "min_games":        "5" # nombre de parties un joueur doit déjà avoir jouées pour pouvoir s'"inscrire
+                }
+                return data
+                matches . append( data )
+                break # for the moment, we send back one single match
+            else: continue # no break occurred : go to next round
+            break # don't go to next round
+        # the loop is done (for this competition)
+    except: return # empty => main loop in the view goes on
+    return matches # api_next_match in views will wrap it in a JsonResponse(
+
+
 def compute_timeouts(pattern):
     """Return a list[ (match, timeouts) ] for the competitions whose name matches
     `pattern`, where timeouts is a dict {club_id: [player_id's...]}."""
@@ -62,6 +112,7 @@ def compute_multiteam(pattern=''):
                     if CLUB_NAME and not isinstance(this_team[0], str):
                         this_team.insert(0, CLUB_NAME)
     return [ MTP( player, players[player] ) for player in multi_team_players ]
+
 from typing import NamedTuple
 class MTP(NamedTuple):
     player: str; teams: dict

@@ -117,6 +117,12 @@ class Club(BaseModel):
     # 3-letter abbreviation for the "tableau de classement"
     abbreviation = models.CharField(max_length=3, blank=True, null=True)
 
+    @property
+    def club_id(self):
+        return self.raw_data.get('club_id') or self.update_from_api(
+            ) and self.raw_data.get('club_id')
+
+
     def save(self, *args, **kwargs):
         if not self.name and (name := (self.raw_data or {}).get('name')):
            self.name = name ; NAME = name.upper()

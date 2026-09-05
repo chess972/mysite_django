@@ -39,9 +39,6 @@ urlpatterns = [
     # Called by the JS for each match in the list/table, when clicking "Rencontres [actualiser]"
     path('competition/<str:compet>/update/<str:match_id>/', views.update_single_match, name='match-update'),
 
-    # This "API" sends a JsonResponse which contains the data allowing the bookmarklet
-    # to fill in the match creation form
-    path('create_match_data/', views.create_match_data, name='create_match_data'),
 
     path('maj_member_count/', views.maj_member_count, name='maj_member_count'),
     path('maj_participation/', views.maj_participation, name='maj_participation'),
@@ -51,7 +48,14 @@ urlpatterns = [
     # this updated Match.name from raw_data -- no more needed, now done in Match.save()
     path('update-match-names/', views.update_match_names, name='update_match_names'),
     path('api/receive-links/', views.bookmarklet_receiver, name='bookmarklet_receiver'),
+
+    # This "API" sends a JsonResponse which contains the data allowing the
+    # JS bookmarklet to fill in the match creation form
     path('api/next-match/', views.api_next_match, name='api_next_match'),
+
+    # This "API" sends a JsonResponse which contains the data allowing the
+    # tampermonkey script to fill in the match creation form
+    path('create_match_data/', views.api_next_match, name='create_match_data'),
 
     # This comes last because it's "catch_all"
     path('<str:pattern>/', views.homepage, name='home'),

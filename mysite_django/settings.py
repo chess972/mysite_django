@@ -10,24 +10,34 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
 
-# import os # use path lib instead
+import os # for getenv() -- for paths, better use path lib instead
 from pathlib import Path
+from dotenv import load_dotenv
+
 #APPEND_SLASH=False # leave this true so that url paths with parameters are recognized
 
 # To build paths inside the project, use: BASE_DIR / 'subdir'.
-# On PythonAnywhere, this file is /home/MFH/mysite_django/mysite_django/settings.py
-# so BASE_DIR is '/home/MFH/mysite_django', but this may change in GitHub / Render
+# On PythonAnywhere, this file is /home/username/mysite_django/mysite_django/settings.py
+# so BASE_DIR is '/home/username/mysite_django', but this may change in GitHub / Render
 BASE_DIR = Path(__file__).resolve().parent.parent
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
+# load SECRET_KEY etc. from .env
+
+load_dotenv(BASE_DIR / ".env")
+
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-tj&qb6_pahbl-n&3%nifrw!u&qjxrmr-a%0fu3e2h_&26!r3(^"
+#SECRET_KEY = "django-insecure-blabla"
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+SECRET_TOKEN = os.getenv("SECRET_TOKEN") # for the bookmarklet
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+#DEBUG = True
+DEBUG = os.getenv("DEBUG") == "True"
+
 
 ALLOWED_HOSTS = ['cfe.pythonanywhere.com', 'MFH.pythonanywhere.com']
 

@@ -5,6 +5,8 @@ from datetime import date,datetime # for current_year in top10
 import io
 import json
 
+from django.conf import settings # for SECRET_TOKEN
+
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
@@ -21,17 +23,20 @@ from .models import Competition, Match, Club
 from . import services
 # get_next_match, compute_multiteam, calcul_classement, update_match, create_matches, extract_match_ids_from_HTML
 
+
 # path('api/next-match/', views.api_next_match, name='api_next_match'),
 def api_next_match(request, pattern=''):
     """Return Json with data for filling in the form at chess.com, to create the next competition."""
-    if"_"in pattern: pattern = pattern.replace("_"," ")
+    if "_" in pattern: pattern = pattern.replace("_"," ")
     for comp in Competition.objects.filter(status__startswith="incomplet", name__icontains=pattern):
-        if response := services.get_next_match(comp): # from services
+        if data := services.get_next_match(comp): # from services
+            response = JsonResponse(data, safe=False)
+            # Important : Autoriser la lecture cross-origin depuis Chess.com
+            response["Access-Control-Allow-Origin"] = "*"
             return response
     return JsonResponse({ 'status': 'error', 'message':
         f"Aucun match à programmer trouvé pour {pattern = !r}" if pattern
-        else "Aucun match à programmer trouvé !"
-        }, status=404)
+        else "Aucun match à programmer trouvé !" }, status=404)
 
 
 #    path('multiequipe/<str:compet>/', views.multiequipe, name='multi-team'),
@@ -105,7 +110,6 @@ def timeout(request, pattern:str):
 
 
 ### API FOR SCRAPING C.C FORUM/ANNOUNCEMENT PAGES ###
-SECRET_TOKEN = "my-super-secret-token-88372"
 
 # helper fct for bookmarklet_receiver
 def french_to_aware_dt(french_date: str):
@@ -128,6 +132,7 @@ def cc_response(data=None, status=404, **kwargs):
     response["Access-Control-Allow-Origin"] = "https://www.chess.com"
     return response
 
+#SECRET_TOKEN = "my-super-secret-token-12345" # now in .env / settings
 
 @csrf_exempt
 def bookmarklet_receiver(request):
@@ -147,7 +152,7 @@ def bookmarklet_receiver(request):
 
             token = data.get("token")
             # Security check
-            if token != SECRET_TOKEN: return cc_response("Invalid token", status=403)
+            if token != settings.SECRET_TOKEN: return cc_response("Invalid token", status=403)
 
             # do the scraping in the JS, so let's expect a list of links
             if not(match_ids := data.get("match_ids")):
@@ -205,32 +210,6 @@ def bookmarklet_receiver(request):
 
     return JsonResponse({"error": "Method not allowed"}, status=405)
 
-#    path('create_match_data/', views.create_match_data, name='create_match_data'),
-def create_match_data(request):
-    # Récupère les compétitions "à créer" ou qui n'ont pas encore leurs matchs programmés
-    competitions = Competition.objects.filter(status='to_create') # TODO : Ajuster ce filtre
-    matches = []
-    for comp in competitions:
-        # Extraire les infos nécessaires depuis raw_data ou les champs du modèle
-        matches.append({
-            "titre": (name := comp.raw_data.get('title')),
-            "description": comp.raw_data.get('description'),
-            "club_hote_id": str(comp.raw_data.get('club_hote_id')),
-            "club_invite_name": comp.raw_data.get('club_invite_name'),
-            "date": comp.raw_data.get('date', '05/10/2026'),
-            "days_per_move": str(comp.raw_data.get('days_per_move', '3')),
-            "min_players": str(comp.raw_data.get('min_players', '3')),
-            "max_players": str(comp.raw_data.get('max_players', '')),
-            "min_rating": str(comp.raw_data.get('min_rating', '')),
-            "max_rating": str(comp.raw_data.get('max_rating',
-                '1400'if'1400'in name else'1000'if'1000'in name else'')),
-            "games_per_player": "2",
-            "min_games": "5" # nombre de parties un joueur doit déjà avoir jouées
-        })
-    response = JsonResponse(matches, safe=False)
-    # Important : Autoriser la lecture cross-origin depuis Chess.com
-    response["Access-Control-Allow-Origin"] = "*"
-    return response
 
 #    path('classement/<str:compet>/', views.classement, name='classement'),
 def classement(request, compet: str):
