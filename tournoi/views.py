@@ -22,10 +22,10 @@ from .models import Competition, Match, Club
 from . import services
 # get_next_match, compute_multiteam, calcul_classement, update_match, create_matches, extract_match_ids_from_HTML
 
-# path('bookmarklet-installer/', views.bookmarklet_installer, name='bookmarklet_installer'),
+# path('bookmarklets/', views.bookmarklets, name='bookmarklets'),
 @login_required
-def bookmarklet_installer(request):
-    return render(request, 'bookmarklet_installer.html', context = {
+def bookmarklets(request):
+    return render(request, 'bookmarklets.html', context = { 'files':[],
         'secret_token': settings.SECRET_TOKEN
     })
 
@@ -36,13 +36,13 @@ def api_next_match(request, pattern=''):
     count = 0
     for comp in Competition.objects.filter(status__startswith="incomplet", name__icontains=pattern):
         count += 1
-        if data := services.get_next_match(comp): # from services
-            response = JsonResponse(data, safe=False)
+        if data := services.get_next_match(comp): # no debugging
+            response = JsonResponse(data['matches'], safe=False)
             # Important : Autoriser la lecture cross-origin depuis Chess.com
             response["Access-Control-Allow-Origin"] = "*"
             return response
-    return JsonResponse({ 'status': 'error', 'message':
-        f"Aucun match à programmer trouvé pour {pattern = !r}" if pattern
+    return JsonResponse({ 'status': 'error',
+        'message': f"Aucun match à programmer trouvé pour {pattern = !r}" if pattern
         else f"Aucun match à programmer trouvé, dans {count} compèt 'incomplètes' !" }, status=404)
 
 

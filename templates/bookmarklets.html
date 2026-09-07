@@ -1,0 +1,25 @@
+{# templates/bookmarklets.html -- context: files, secret_token #}
+{% extends base.html %}
+{% section title %}Installation Bookmarklets{% endsection %}
+{% section content %}
+<p>Faites glisser l'un et/ou l'autre bouton ci-après dans la barre des signets de votre navigateur:</p>
+{% if user.is_staff %}
+<a class="btn" href="javascript:(function(){
+    const token = '{{ secret_token }}';
+    const pageUrl = encodeURIComponent(window.location.href);
+    fetch('https://yourusername.pythonanywhere.com/api/save/?token=' + token + '&url=' + pageUrl)
+        .then(r => r.json())
+        .then(d => alert('Saved successfully!'));
+})();">
+    📥 Save to My Django App
+</a>
+{%if files %}
+    &nbsp;<br/>
+    <h2>Bookmarklets</h2>
+{% for file in files %}
+    <h4>{{file}}</h4>
+    <textarea readonly>{% include file %}</textarea>
+{% endfor %}
+    {% endif %}{# files #}
+{% endif %}{# user.is_staff #}
+{% endsection %}

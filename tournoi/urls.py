@@ -33,7 +33,7 @@ urlpatterns = [
     # Liste des parties perdues au temps (par joueur, par compet)
     path('timeout/<str:pattern>/', views.timeout, name='timeout'),
 
-    path('bookmarklet-installer/', views.bookmarklet_installer, name='bookmarklet_installer'),
+    path('bookmarklets/', views.bookmarklets, name='bookmarklets'),
 
     # these redirect to the club page
     path('maj_member_count/', views.maj_member_count, name='maj_member_count'),

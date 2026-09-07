@@ -15,19 +15,23 @@ from tournoi.constants import aliases, headers # used below in compute_multiteam
 from .classement import calcul_classement, Classement #, TD
 from .extract import create_matches, extract_match_ids_from_HTML
 
-
 # called from views.api_next_match
-def get_next_match(comp: Competition):
+def get_next_match(comp: Competition, debugging = False):
     """Renvoit la Json Response avec les données nécessaires pour remplir le
     formulaire de création de match sur chess.com, pour le prochain match à
     créer dans la ou les `compet`."""
-    matches=[ "scanning compet "+comp.name ]
+    response = { 'matches': (matches := {}), 'debug': (debug := []) }
+    if debugging: debug += ["activating debug mode"] # without this, no debugging
+    if debug: debug += [ "scanning compet "+comp.name ]
     try:
-        if not(create := comp.raw_data.get('create')): return # must be present
-        matches += [ "found 'create'" ]
+        if not(create := comp.raw_data.get('create')):
+            if debug: debug += [f"fatal error: no entry 'create' in {compet = !r}"]
+            return # must be present
+        if debug: debug += [ "found 'create'" ]
         if not (rounds := create.get('rounds')):
             rounds = [create]
-            matches += [ "created 'rounds'" ]
+            if debug: debug += [ "created 'rounds'" ]
+            # debugging messages - should be ignored by the bookmarklet
 
         # to get a parameter, first check in `ronde`, then in `create`
         def get(keys: str|list[str], default=''):
@@ -47,7 +51,7 @@ def get_next_match(comp: Competition):
             for pair in pairings:
                 clubs = Club.objects.in_bulk(pair)
                 team1, team2 = (clubs.get(team) for team in pair)
-                matches += [ f"teams are {team1} & {team2}" ]
+                if debug: debug += [ f"Teams are {team1} & {team2}" ]
                 title = get(["titre",'title'], comp.name)
                 if " vs " not in title:
                     title = title.strip(" :") + " : {team1} vs {team2}"
@@ -76,8 +80,9 @@ def get_next_match(comp: Competition):
             else: continue # no break occurred : go to next round
             break # don't go to next round
         # the loop is done (for this competition)
-    except Exception as e: matches += [ e ] #return # empty => main loop in the view goes on
-    return matches # api_next_match in views will wrap it in a JsonResponse(
+    except Exception as e:
+        debug += [ e ] #return # empty => main loop in the view goes on
+    return response # api_next_match in views will wrap it in a JsonResponse()
 
 
 def compute_timeouts(pattern):
