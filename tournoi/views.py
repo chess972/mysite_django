@@ -5,8 +5,7 @@ from datetime import date,datetime # for current_year in top10
 import io
 import json
 
-from django.conf import settings # for SECRET_TOKEN
-
+from django.conf import settings # for SECRET_TOKEN (from settings.py, from .env)
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
@@ -23,6 +22,12 @@ from .models import Competition, Match, Club
 from . import services
 # get_next_match, compute_multiteam, calcul_classement, update_match, create_matches, extract_match_ids_from_HTML
 
+# path('bookmarklet-installer/', views.bookmarklet_installer, name='bookmarklet_installer'),
+@login_required
+def bookmarklet_installer(request):
+    return render(request, 'bookmarklet_installer.html', context = {
+        'secret_token': settings.SECRET_TOKEN
+    })
 
 # path('api/next-match/', views.api_next_match, name='api_next_match'),
 def api_next_match(request, pattern=''):
