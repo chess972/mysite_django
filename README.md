@@ -1,8 +1,12 @@
+## About this repo & web app
+This django web app is for managing medium sized inter-club ("daily") competitions on chess.com (= C.C below).
+I am actually building it on cfe.pythonanywhere.com.
+This repo serves as backup/archive, and also helps to sync the files from there with those on my personal computer(s),
+where I can easily use "hugo server" to test it.
+
 # Gestion CFE-LFR-CFT
 
-This django web app is for managing medium sized inter-club ("daily") competitions on chess.com (= C.C below).
-Specifically, it is currently designed for the CFE / LFR / CFT competitions,
-validated by chess.com_fr.
+Specifically, it is currently designed for the CFE / LFR / CFT competitions, officially validated by chess.com_fr.
 
 These competitions are announced on C.C forums. A club announcement or forum page will
 "define" each "competition", which might be, e.g. "CFE 2026 D1" or "CFT 2027 Phases finales"
